@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="pt-BR" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CSGONADES Chat - Voz, Vídeo & Grupos</title>
+    <link rel="stylesheet" href="/css/style.css">
+    <link rel="stylesheet" href="/css/webrtc.css">
+    <!-- Google Fonts Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- Socket.IO Client -->
+    <script src="/socket.io/socket.io.js"></script>
+</head>
+<body>
+    <!-- App Container -->
+    <div id="app" class="app-root">
+        
+        <!-- ============================================== -->
+        <!-- 1. TELA DE LOGIN / CADASTRO (QUANDO NÃO LOGADO) -->
+        <!-- ============================================== -->
+        <div id="auth-screen" class="auth-wrapper" style="display: none;">
+            <div class="auth-card">
+                <div class="auth-header">
+                    <div class="brand-badge">
+                        <span class="brand-icon">🌸</span>
+                        <span class="brand-title">CSGONADES</span>
+                    </div>
+                    <h2 id="auth-title">Bem-vindo de volta!</h2>
+                    <p id="auth-subtitle">Estamos muito animados em ver você de novo!</p>
+                </div>
+
+                <div class="auth-tabs">
+                    <button type="button" class="auth-tab active" id="tab-login-btn">Entrar</button>
+                    <button type="button" class="auth-tab" id="tab-register-btn">Criar Conta</button>
+                </div>
+
+                <!-- Formulário de Login -->
+                <form id="login-form" class="auth-form">
+                    <div class="form-group">
+                        <label for="login-email">E-mail ou Usuário</label>
+                        <input type="text" id="login-email" placeholder="seu@email.com" required autocomplete="username">
+                    </div>
+                    <div class="form-group">
+                        <label for="login-password">Senha</label>
+                        <input type="password" id="login-password" placeholder="••••••••" required autocomplete="current-password">
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-block">Entrar no Aplicativo</button>
+                    
+                    <div class="demo-quick-login">
+                        <p class="quick-title">Contas de teste rápido:</p>
+                        <div class="quick-buttons">
+                            <button type="button" class="btn-chip" id="demo-admin-btn">🔑 Admin (admin123)</button>
+                            <button type="button" class="btn-chip" id="demo-amigo-btn">👤 Amigo Demo (amigo123)</button>
+                        </div>
+                    </div>
+                </form>
+
+                <!-- Formulário de Cadastro -->
+                <form id="register-form" class="auth-form" style="display: none;">
+                    <div class="form-group">
+                        <label for="reg-username">Nome de Usuário (único)</label>
+                        <input type="text" id="reg-username" placeholder="ex: mikael_gamer" required autocomplete="username">
+                        <small class="form-hint">Apenas letras, números e underline (sem espaços).</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="reg-display-name">Nome de Exibição (como amigos vão te ver)</label>
+                        <input type="text" id="reg-display-name" placeholder="ex: Mikael Silva">
+                    </div>
+                    <div class="form-group">
+                        <label for="reg-email">E-mail</label>
+                        <input type="email" id="reg-email" placeholder="seu@email.com" required autocomplete="email">
+                    </div>
+                    <div class="form-group">
+                        <label for="reg-password">Senha</label>
+                        <input type="password" id="reg-password" placeholder="Mínimo 4 caracteres" required autocomplete="new-password">
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-block">Finalizar Cadastro</button>
+                </form>
+
+                <div id="auth-alert" class="alert-box" style="display: none;"></div>
+            </div>
+        </div>
+
+        <!-- ============================================== -->
+        <!-- 2. TELA PRINCIPAL DO APLICATIVO (LOGADO)       -->
+        <!-- ============================================== -->
+        <div id="main-screen" class="main-layout" style="display: flex;">
+            
+            <!-- COLUNA 1: BARRA DE SERVIDORES (ESTILO DISCORD) -->
+            <nav class="servers-rail" aria-label="Servidores">
+                <button class="server-btn home-btn active" id="btn-nav-home" title="Mensagens Diretas & Amigos">
+                    <span class="icon">🌸</span>
+                </button>
+
+                <div class="rail-divider"></div>
+
+                <!-- Lista de Servidores do Usuário -->
+                <div class="servers-list" id="servers-list-container">
+                    <!-- Gerado dinamicamente via JS -->
+                </div>
+
+                <div class="rail-actions">
+                    <button class="server-btn add-btn" id="btn-add-server" title="Criar ou Entrar em um Grupo">
+                        <span class="icon">+</span>
+                    </button>
+                    <button class="server-btn theme-btn" id="btn-toggle-theme" title="Alternar Tema Claro / Escuro">
+                        <span class="icon" id="theme-icon">🌙</span>
+                    </button>
+                </div>
+            </nav>
+
+            <!-- COLUNA 2: BARRA LATERAL CONTEXTUAL (AMIGOS OU CANAIS) -->
+            <aside class="sidebar-secondary">
+                
+                <!-- CABEÇALHO DO SIDEBAR -->
+                <header class="sidebar-header" id="sidebar-header">
+                    <div class="header-info">
+                        <h3 id="sidebar-title">Mensagens Diretas</h3>
+                        <span id="sidebar-badge" class="header-badge"></span>
+                    </div>
+                    <div class="header-actions" id="sidebar-header-actions">
+                        <!-- Botão de opções do servidor ou novo grupo -->
+                    </div>
+                </header>
+
+                <!-- CONTEÚDO QUANDO NA ABA INICIAL (AMIGOS & DMS) -->
+                <div id="home-sidebar-view" class="sidebar-content">
+                    <div class="friends-nav-links">
+                        <button class="nav-item active" data-tab="online" id="tab-nav-online">
+                            <span class="nav-icon">🟢</span> Amigos Online
+                        </button>
+                        <button class="nav-item" data-tab="all" id="tab-nav-all">
+                            <span class="nav-icon">👥</span> Todos os Amigos
+                        </button>
+                        <button class="nav-item" data-tab="pending" id="tab-nav-pending">
+                            <span class="nav-icon">⏳</span> Pendentes
+                            <span class="badge" id="pending-count-badge" style="display:none;">0</span>
+                        </button>
+                        <button class="nav-item highlight" data-tab="add" id="tab-nav-add">
+                            <span class="nav-icon">➕</span> Adicionar Amigo
+                        </button>
+                    </div>
+
+                    <div class="section-title">
+                        <span>MENSAGENS DIRETAS</span>
+                    </div>
+
+                    <div class="dm-conversations-list" id="dm-list-container">
+                        <!-- Lista de conversas diretas -->
+                    </div>
+                </div>
+
+                <!-- CONTEÚDO QUANDO DENTRO DE UM SERVIDOR -->
+                <div id="server-sidebar-view" class="sidebar-content" style="display: none;">
+                    <div class="channel-group">
+                        <div class="channel-group-header">
+                            <span>CANAIS DE TEXTO</span>
+                            <button class="btn-icon-tiny" id="btn-create-text-channel" title="Criar Canal de Texto">+</button>
+                        </div>
+                        <div class="channels-list" id="server-text-channels">
+                            <!-- Canais de texto -->
+                        </div>
+                    </div>
+
+                    <div class="channel-group">
+                        <div class="channel-group-header">
+                            <span>SALAS DE VOZ & VÍDEO</span>
+                            <button class="btn-icon-tiny" id="btn-create-voice-channel" title="Criar Sala de Voz">+</button>
+                        </div>
+                        <div class="channels-list" id="server-voice-channels">
+                            <!-- Salas de voz e lista de pessoas dentro delas -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- BARRA DE STATUS INFERIOR DO USUÁRIO CONECTADO -->
+                <footer class="user-control-tray">
+                    <div class="user-preview" id="btn-open-profile" title="Ver Meu Perfil">
+                        <div class="avatar-wrapper">
+                            <img id="my-avatar" src="/assets/default-avatar.png" alt="Avatar">
+                            <span class="status-indicator online" id="my-status-indicator"></span>
+                        </div>
+                        <div class="user-meta">
+                            <span class="user-display-name" id="my-display-name">Carregando...</span>
+                            <span class="user-tag" id="my-username">@usuario</span>
+                        </div>
+                    </div>
+
+                    <div class="user-media-controls">
+                        <button class="tray-icon-btn" id="btn-toggle-mic" title="Silenciar Microfone">
+                            <span class="icon" id="mic-icon">🎙️</span>
+                        </button>
+                        <button class="tray-icon-btn" id="btn-toggle-deafen" title="Ensordecer Áudio">
+                            <span class="icon" id="deafen-icon">🎧</span>
+                        </button>
+                        <button class="tray-icon-btn" id="btn-open-settings" title="Configurações">
+                            <span class="icon">⚙️</span>
+                        </button>
+                    </div>
+                </footer>
+            </aside>
+
+            <!-- COLUNA 3: ÁREA PRINCIPAL DE CONTEÚDO (CHAT OU VOZ/VÍDEO OU HUB DE AMIGOS) -->
+            <main class="chat-workspace">
+                
+                <!-- BARRA SUPERIOR DO CHAT / SALA -->
+                <header class="workspace-topbar">
+                    <div class="topbar-left">
+                        <span class="channel-symbol" id="active-symbol">#</span>
+                        <h3 class="topbar-title" id="active-title">Amigos</h3>
+                        <span class="topbar-divider">|</span>
+                        <p class="topbar-desc" id="active-desc">Seu hub de amigos e conexões</p>
+                    </div>
+
+                    <div class="topbar-right" id="topbar-right-actions">
+                        <!-- Botões de chamada direta quando em DM -->
+                        <div id="dm-call-actions" style="display: none;">
+                            <button class="btn-icon" id="btn-start-voice-call" title="Iniciar Chamada de Voz">
+                                📞
+                            </button>
+                            <button class="btn-icon" id="btn-start-video-call" title="Iniciar Chamada com Câmera">
+                                📹
+                            </button>
+                        </div>
+                        <button class="btn-icon" id="btn-toggle-member-sidebar" title="Membros do Grupo">
+                            👥
+                        </button>
+                    </div>
+                </header>
+
+                <!-- VISÃO 1: HUB DE AMIGOS (QUANDO EM NENHUM CANAL OU DM) -->
+                <section id="friends-hub-view" class="workspace-content">
+                    
+                    <!-- Barra de busca rápida de amigos -->
+                    <div class="hub-search-bar">
+                        <input type="text" id="filter-friends-input" placeholder="Buscar nos amigos...">
+                    </div>
+
+                    <!-- Conteúdo dinâmico das abas de amigos -->
+                    <div id="friends-tab-content" class="friends-list-wrapper">
+                        <!-- Preenchido via friends.js -->
+                    </div>
+
+                    <!-- Sub-Aba: Adicionar Amigo -->
+                    <div id="add-friend-panel" class="add-friend-section" style="display: none;">
+                        <div class="add-friend-card">
+                            <h3>ADICIONAR AMIGO</h3>
+                            <p>Você pode adicionar amigos usando o nome de usuário ou e-mail cadastrado.</p>
+                            <form id="add-friend-form" class="add-friend-form">
+                                <div class="input-with-button">
+                                    <input type="text" id="add-friend-input" placeholder="ex: amigo_demo ou amigo@csgonades.local" required>
+                                    <button type="submit" class="btn btn-primary">Enviar Pedido</button>
+                                </div>
+                            </form>
+                            <div id="add-friend-feedback" class="feedback-msg" style="display: none;"></div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- VISÃO 2: CHAT DE MENSAGENS (TEXTO EM CANAL OU DM) -->
+                <section id="chat-messages-view" class="workspace-content" style="display: none;">
+                    
+                    <!-- Área de scroll de mensagens -->
+                    <div class="messages-scroller" id="messages-container">
+                        <!-- Mensagens renderizadas dinamicamente -->
+                    </div>
+
+                    <!-- Indicador de digitação -->
+                    <div class="typing-indicator-bar" id="typing-indicator" style="display: none;">
+                        <span class="typing-dots"><span>.</span><span>.</span><span>.</span></span>
+                        <span class="typing-text" id="typing-text">Alguém está digitando...</span>
+                    </div>
+
+                    <!-- Barra de envio de mensagem -->
+                    <footer class="message-composer-wrapper">
+                        <div class="composer-box">
+                            <button class="btn-composer-icon" id="btn-attachment" title="Enviar Imagem ou Arquivo">
+                                📎
+                            </button>
+                            <input type="file" id="file-input" style="display: none;" accept="image/*,.pdf,.zip,.txt">
+
+                            <textarea id="message-input" rows="1" placeholder="Conversar em #geral..." maxlength="2000"></textarea>
+
+                            <div class="composer-right-actions">
+                                <button class="btn-composer-icon" id="btn-emoji-toggle" title="Emojis">
+                                    😊
+                                </button>
+                                <button class="btn-composer-send" id="btn-send-message" title="Enviar (Enter)">
+                                    ➔
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Prévia de anexo pendente -->
+                        <div id="attachment-preview-bar" class="attachment-preview" style="display: none;">
+                            <span id="attachment-name">arquivo.png</span>
+                            <button type="button" id="btn-cancel-attachment" class="btn-close-sm">✕</button>
+                        </div>
+
+                        <!-- Menu suspenso de Emojis rápidos -->
+                        <div id="emoji-picker" class="emoji-picker-dropdown" style="display: none;">
+                            <div class="emoji-grid">
+                                <span>❤️</span><span>💖</span><span>🌸</span><span>✨</span>
+                                <span>😂</span><span>🤣</span><span>🔥</span><span>🎉</span>
+                                <span>👍</span><span>👏</span><span>🎮</span><span>🚀</span>
+                                <span>👀</span><span>💯</span><span>🙌</span><span>😎</span>
+                            </div>
+                        </div>
+                    </footer>
+                </section>
+
+                <!-- VISÃO 3: SALA DE VOZ, VÍDEO & COMPARTILHAMENTO DE TELA (WebRTC) -->
+                <section id="voice-video-room-view" class="workspace-content webrtc-workspace" style="display: none;">
+                    <div class="webrtc-header">
+                        <div class="room-status-badge">
+                            <span class="live-dot"></span>
+                            <span id="webrtc-room-name">Conectado na Sala de Voz</span>
+                        </div>
+                        <span id="webrtc-participants-count" class="pill-badge">1 participante</span>
+                    </div>
+
+                    <!-- Grid de Vídeos / Participantes -->
+                    <div class="video-grid" id="video-grid-container">
+                        <!-- Tiles de vídeo dos participantes adicionados dinamicamente -->
+                    </div>
+
+                    <!-- Barra Flutuante de Controles de Voz, Câmera e Compartilhamento de Tela -->
+                    <div class="webrtc-control-bar">
+                        <button class="webrtc-btn" id="webrtc-mic-btn" title="Silenciar / Ativar Microfone">
+                            <span class="icon">🎙️</span>
+                            <span class="btn-label">Voz</span>
+                        </button>
+                        <button class="webrtc-btn" id="webrtc-video-btn" title="Ligar / Desligar Webcam">
+                            <span class="icon">📹</span>
+                            <span class="btn-label">Câmera</span>
+                        </button>
+                        <button class="webrtc-btn highlight-screen" id="webrtc-screen-btn" title="Compartilhar Tela">
+                            <span class="icon">🖥️</span>
+                            <span class="btn-label">Compartilhar Tela</span>
+                        </button>
+                        <button class="webrtc-btn danger" id="webrtc-leave-btn" title="Desconectar da Sala">
+                            <span class="icon">📞</span>
+                            <span class="btn-label">Desconectar</span>
+                        </button>
+                    </div>
+                </section>
+            </main>
+
+            <!-- COLUNA 4: LISTA DE MEMBROS (QUANDO EM SERVIDOR) -->
+            <aside class="sidebar-members" id="members-sidebar">
+                <div class="members-header">
+                    <h4>MEMBROS</h4>
+                    <span id="members-count" class="members-badge">0</span>
+                </div>
+                <div class="members-list-scroll" id="members-list-container">
+                    <!-- Membros do servidor renderizados dinamicamente -->
+                </div>
+            </aside>
+        </div>
+
+        <!-- ============================================== -->
+        <!-- MODAIS DO SISTEMA                              -->
+        <!-- ============================================== -->
+        
+        <!-- Modal: Criar ou Entrar em Servidor -->
+        <div id="modal-server" class="modal-overlay" style="display: none;">
+            <div class="modal-card">
+                <div class="modal-header">
+                    <h3>Criar ou Entrar em um Grupo</h3>
+                    <button class="modal-close" data-close="modal-server">✕</button>
+                </div>
+                <div class="modal-tabs">
+                    <button class="modal-tab active" id="tab-create-server">Criar Servidor</button>
+                    <button class="modal-tab" id="tab-join-server">Entrar com Código</button>
+                </div>
+                
+                <!-- Criar -->
+                <form id="form-create-server" class="modal-body">
+                    <div class="form-group">
+                        <label>Nome do Servidor</label>
+                        <input type="text" id="server-name-input" placeholder="ex: Servidor dos Amigos" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Descrição (opcional)</label>
+                        <input type="text" id="server-desc-input" placeholder="Para bater papo, jogar e conversar em vídeo">
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-block">Criar Meu Servidor</button>
+                </form>
+
+                <!-- Entrar com Código -->
+                <form id="form-join-server" class="modal-body" style="display: none;">
+                    <div class="form-group">
+                        <label>Código de Convite</label>
+                        <input type="text" id="server-invite-input" placeholder="ex: GERAL2026" required style="text-transform: uppercase;">
+                        <small class="form-hint">Peça o código de convite ao dono do servidor.</small>
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-block">Entrar no Grupo</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Modal: Criar Canal -->
+        <div id="modal-channel" class="modal-overlay" style="display: none;">
+            <div class="modal-card">
+                <div class="modal-header">
+                    <h3 id="modal-channel-title">Criar Canal</h3>
+                    <button class="modal-close" data-close="modal-channel">✕</button>
+                </div>
+                <form id="form-create-channel" class="modal-body">
+                    <div class="form-group">
+                        <label>Tipo do Canal</label>
+                        <div class="radio-cards">
+                            <label class="radio-card">
+                                <input type="radio" name="channel-type" value="text" checked>
+                                <span class="card-box">
+                                    <strong># Canal de Texto</strong>
+                                    <small>Envie mensagens, imagens e arquivos</small>
+                                </span>
+                            </label>
+                            <label class="radio-card">
+                                <input type="radio" name="channel-type" value="voice">
+                                <span class="card-box">
+                                    <strong>🔊 Sala de Voz & Vídeo</strong>
+                                    <small>Fale em tempo real, ligue câmera e compartilhe tela</small>
+                                </span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Nome do Canal</label>
+                        <input type="text" id="channel-name-input" placeholder="ex: memes-e-jogos" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-block">Criar Canal</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Modal: Configurações de Perfil e Logout -->
+        <div id="modal-profile" class="modal-overlay" style="display: none;">
+            <div class="modal-card">
+                <div class="modal-header">
+                    <h3>Meu Perfil & Configurações</h3>
+                    <button class="modal-close" data-close="modal-profile">✕</button>
+                </div>
+                <form id="form-edit-profile" class="modal-body">
+                    <div class="form-group">
+                        <label>Nome de Exibição</label>
+                        <input type="text" id="profile-display-name">
+                    </div>
+                    <div class="form-group">
+                        <label>Sobre Mim (Bio)</label>
+                        <textarea id="profile-bio" rows="2" placeholder="Conte algo sobre você..."></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label>Status</label>
+                        <select id="profile-status-select" class="form-select">
+                            <option value="online">🟢 Online</option>
+                            <option value="idle">🟡 Ausente</option>
+                            <option value="dnd">🔴 Não Perturbe</option>
+                            <option value="offline">⚪ Invisível</option>
+                        </select>
+                    </div>
+                    <div class="form-actions-split">
+                        <button type="submit" class="btn btn-primary">Salvar Alterações</button>
+                        <button type="button" class="btn btn-danger" id="btn-logout">Sair da Conta</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Modal: Visualizador de Imagem (Lightbox) -->
+        <div id="modal-lightbox" class="modal-overlay lightbox-overlay" style="display: none;">
+            <div class="lightbox-content">
+                <button class="lightbox-close" id="lightbox-close-btn">✕</button>
+                <img id="lightbox-img" src="" alt="Imagem ampliada">
+                <a id="lightbox-download-btn" href="" download class="btn btn-primary btn-sm">Baixar Imagem</a>
+            </div>
+        </div>
+
+        <!-- Notificação de Chamada Recebida -->
+        <div id="incoming-call-banner" class="incoming-call-card" style="display: none;">
+            <div class="caller-info">
+                <img id="caller-avatar" src="/assets/default-avatar.png" alt="Chamador">
+                <div>
+                    <h4 id="caller-name">Amigo</h4>
+                    <p id="caller-type-desc">Chamada de voz/vídeo recebida...</p>
+                </div>
+            </div>
+            <div class="call-actions">
+                <button class="btn btn-success" id="btn-accept-call">Atender 📞</button>
+                <button class="btn btn-danger" id="btn-decline-call">Recusar ✕</button>
+            </div>
+        </div>
+
+        <!-- Toast de Notificação -->
+        <div id="toast-container" class="toast-container"></div>
+    </div>
+
+    <!-- Scripts do Aplicativo -->
+    <script src="/js/theme.js"></script>
+    <script src="/js/webrtc.js"></script>
+    <script src="/js/friends.js"></script>
+    <script src="/js/servers.js"></script>
+    <script src="/js/chat.js"></script>
+    <script src="/js/auth.js"></script>
+    <script src="/js/app.js"></script>
+</body>
+</html>

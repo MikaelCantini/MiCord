@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <defs>
+    <linearGradient id="adminGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#8e44ad"/>
+      <stop offset="100%" stop-color="#e91e63"/>
+    </linearGradient>
+  </defs>
+  <circle cx="50" cy="50" r="48" fill="url(#adminGrad)"/>
+  <!-- Crown / Star -->
+  <polygon points="50,16 54,26 64,27 57,34 59,44 50,39 41,44 43,34 36,27 46,26" fill="#f1c40f"/>
+  <circle cx="50" cy="46" r="16" fill="#ffffff" opacity="0.95"/>
+  <path d="M 22 84 C 22 68, 35 64, 50 64 C 65 64, 78 68, 78 84 Z" fill="#ffffff" opacity="0.95"/>
+</svg>

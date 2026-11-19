@@ -1,0 +1,23 @@
+{
+  "name": "csgonades",
+  "version": "1.0.0",
+  "description": "Aplicativo de conversa, voz, vídeo, grupos e painel de gestão com banco de dados SQLite",
+  "scripts": {
+    "start": "node start-both.js",
+    "start:app": "node app/server.js",
+    "start:gestao": "node gestao/server.js",
+    "init:db": "node gestao/database/initDb.js"
+  },
+  "keywords": [
+    "chat",
+    "discord",
+    "skype",
+    "teamspeak",
+    "webrtc",
+    "voice",
+    "video",
+    "screen-sharing"
+  ],
+  "author": "",
+  "license": "ISC"
+}

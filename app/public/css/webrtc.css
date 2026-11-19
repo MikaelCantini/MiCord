@@ -1,0 +1,230 @@
+/* ===================================================================
+   ESTILOS DE VOZ, VÍDEO & COMPARTILHAMENTO DE TELA (WebRTC)
+   =================================================================== */
+
+.webrtc-workspace {
+    background-color: var(--bg-secondary);
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    position: relative;
+    overflow: hidden;
+}
+
+.webrtc-header {
+    height: 48px;
+    padding: 0 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--bg-tertiary);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.room-status-badge {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.9rem;
+    font-weight: 700;
+}
+
+.live-dot {
+    width: 10px;
+    height: 10px;
+    background-color: var(--online-green);
+    border-radius: var(--radius-full);
+    animation: livePulse 1.8s infinite;
+}
+
+.pill-badge {
+    background: var(--accent-pink-soft);
+    color: var(--accent-pink);
+    font-size: 0.75rem;
+    font-weight: 700;
+    padding: 4px 10px;
+    border-radius: var(--radius-full);
+}
+
+/* Grid de Vídeos e Participantes */
+.video-grid {
+    flex: 1;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px;
+    padding: 20px;
+    overflow-y: auto;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Card do Participante */
+.participant-tile {
+    position: relative;
+    background: var(--bg-card);
+    border: 2px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+    aspect-ratio: 16 / 9;
+    min-height: 180px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+/* Indicador de Fala (Glow Verde) */
+.participant-tile.speaking {
+    border-color: var(--online-green) !important;
+    box-shadow: 0 0 16px rgba(46, 204, 113, 0.45) !important;
+}
+
+/* Elemento <video> (Câmera ou Compartilhamento de Tela) */
+.participant-video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    background: #000000;
+}
+
+.participant-video.screen-share {
+    object-fit: contain;
+}
+
+/* Se não estiver com vídeo/tela: exibe avatar central */
+.participant-avatar-view {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+}
+
+.participant-avatar-view img {
+    width: 80px;
+    height: 80px;
+    border-radius: var(--radius-full);
+    border: 3px solid var(--border-color);
+    object-fit: cover;
+    transition: transform 0.15s ease, border-color 0.15s ease;
+}
+
+.participant-tile.speaking .participant-avatar-view img {
+    border-color: var(--online-green);
+    transform: scale(1.08);
+}
+
+/* Informações do Participante (Barra inferior no tile) */
+.participant-overlay {
+    position: absolute;
+    bottom: 10px;
+    left: 10px;
+    right: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    pointer-events: none;
+}
+
+.participant-tag {
+    background: rgba(0, 0, 0, 0.65);
+    backdrop-filter: blur(4px);
+    color: #ffffff;
+    padding: 4px 10px;
+    border-radius: var(--radius-sm);
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.participant-icons {
+    display: flex;
+    gap: 4px;
+}
+
+.state-pill {
+    background: rgba(0, 0, 0, 0.65);
+    padding: 4px 6px;
+    border-radius: var(--radius-sm);
+    font-size: 0.75rem;
+}
+
+/* Tile de Tela Cheia / Destaque */
+.participant-tile.featured-screen {
+    grid-column: 1 / -1;
+    aspect-ratio: 16 / 9;
+    max-height: 65vh;
+}
+
+/* Barra Flutuante de Controles WebRTC */
+.webrtc-control-bar {
+    position: absolute;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    box-shadow: var(--shadow-lg);
+    padding: 10px 18px;
+    border-radius: var(--radius-full);
+    z-index: 100;
+}
+
+.webrtc-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    padding: 8px 14px;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.15s ease;
+}
+
+.webrtc-btn .icon {
+    font-size: 1.25rem;
+}
+
+.webrtc-btn .btn-label {
+    font-size: 0.7rem;
+    font-weight: 700;
+}
+
+.webrtc-btn:hover {
+    background: var(--bg-hover);
+    transform: translateY(-2px);
+}
+
+.webrtc-btn.active {
+    background: var(--accent-pink-soft);
+    border-color: var(--accent-pink);
+    color: var(--accent-pink);
+}
+
+.webrtc-btn.danger {
+    background: #ff4757;
+    border-color: #ff4757;
+    color: #ffffff;
+}
+
+.webrtc-btn.danger:hover {
+    background: #e84118;
+}
+
+.webrtc-btn.highlight-screen {
+    background: var(--accent-gradient);
+    color: #ffffff;
+    border: none;
+}
+
+@keyframes livePulse {
+    0% { transform: scale(0.95); opacity: 0.8; }
+    50% { transform: scale(1.2); opacity: 1; }
+    100% { transform: scale(0.95); opacity: 0.8; }
+}
