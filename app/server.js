@@ -6,7 +6,7 @@ const { Server } = require('socket.io');
 
 const config = require('./src/config');
 const { setupSocketIO } = require('./src/sockets/socketHandler');
-
+//nao sabe nada
 const authRoutes = require('./src/routes/auth');
 const usersRoutes = require('./src/routes/users');
 const friendsRoutes = require('./src/routes/friends');
