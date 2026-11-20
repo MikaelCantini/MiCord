@@ -2,6 +2,7 @@
 const AuthManager = {
     user: null,
     token: null,
+    pendingAvatarUrl: null,
 
     init() {
         this.token = localStorage.getItem('micord_token');
@@ -64,6 +65,11 @@ const AuthManager = {
             e.preventDefault();
             await this.saveProfile();
         });
+
+        // Upload de imagem de perfil (avatar)
+        const avatarInput = document.getElementById('profile-avatar-input');
+        document.getElementById('btn-change-avatar')?.addEventListener('click', () => avatarInput?.click());
+        avatarInput?.addEventListener('change', (e) => this.handleAvatarUpload(e));
     },
 
     // Verifica se já está logado ao entrar no app
@@ -175,16 +181,58 @@ const AuthManager = {
 
     openProfileModal() {
         if (!this.user) return;
+        this.pendingAvatarUrl = null;
+        const preview = document.getElementById('profile-avatar-preview');
+        if (preview) preview.src = this.user.avatar_url || '/assets/default-avatar.png';
+        const avatarInput = document.getElementById('profile-avatar-input');
+        if (avatarInput) avatarInput.value = '';
         document.getElementById('profile-display-name').value = this.user.display_name || '';
         document.getElementById('profile-bio').value = this.user.bio || '';
         document.getElementById('profile-status-select').value = this.user.status || 'online';
         document.getElementById('modal-profile').style.display = 'flex';
     },
 
+    async handleAvatarUpload(e) {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        if (!file.type.startsWith('image/')) {
+            if (window.App) window.App.showToast('Selecione um arquivo de imagem válido.');
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        try {
+            if (window.App) window.App.showToast('Enviando imagem de perfil...');
+            const res = await fetch('/api/upload', {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${this.token}` },
+                body: formData
+            });
+
+            const data = await res.json();
+            if (res.ok && data.url) {
+                this.pendingAvatarUrl = data.url;
+                const preview = document.getElementById('profile-avatar-preview');
+                if (preview) preview.src = data.url;
+                if (window.App) window.App.showToast('Foto carregada! Clique em "Salvar Alterações".');
+            } else {
+                alert(data.error || 'Erro ao enviar imagem.');
+            }
+        } catch (err) {
+            alert('Falha ao enviar imagem de perfil.');
+        }
+    },
+
     async saveProfile() {
         const display_name = document.getElementById('profile-display-name').value;
         const bio = document.getElementById('profile-bio').value;
         const status = document.getElementById('profile-status-select').value;
+        const payload = { display_name, bio, status };
+        if (this.pendingAvatarUrl) {
+            payload.avatar_url = this.pendingAvatarUrl;
+        }
 
         try {
             const res = await fetch('/api/auth/profile', {
@@ -193,12 +241,13 @@ const AuthManager = {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${this.token}`
                 },
-                body: JSON.stringify({ display_name, bio, status })
+                body: JSON.stringify(payload)
             });
 
             const data = await res.json();
             if (res.ok) {
                 this.user = data.user;
+                this.pendingAvatarUrl = null;
                 this.updateUserTray();
                 document.getElementById('modal-profile').style.display = 'none';
                 if (window.App) window.App.showToast('Perfil atualizado com sucesso!');

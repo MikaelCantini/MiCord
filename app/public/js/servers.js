@@ -238,7 +238,8 @@ const ServersManager = {
 
         members.forEach(member => {
             const item = document.createElement('div');
-            item.className = 'member-item';
+            item.className = 'member-item clickable-user';
+            item.title = 'Ver perfil';
             item.innerHTML = `
                 <div class="avatar-wrapper" style="width: 30px; height: 30px;">
                     <img src="${member.avatar_url || '/assets/default-avatar.png'}" alt="${member.display_name}">
@@ -249,6 +250,9 @@ const ServersManager = {
                     <div style="font-size: 0.7rem; color: var(--text-muted); text-transform: capitalize;">${member.role}</div>
                 </div>
             `;
+            item.addEventListener('click', () => {
+                if (window.App) window.App.openUserProfileModal(member.id);
+            });
             container.appendChild(item);
         });
     },

@@ -41,7 +41,35 @@ router.get('/:id', authMiddleware, (req, res) => {
             return res.status(404).json({ error: 'Usuário não encontrado.' });
         }
 
-        return res.json(user);
+        let friendshipStatus = 'none';
+        let requestId = null;
+
+        if (user.id === req.user.id) {
+            friendshipStatus = 'self';
+        } else {
+            const relation = db.queryOne(`
+                SELECT id, user_id, friend_id, status
+                FROM friends
+                WHERE (user_id = ? AND friend_id = ?) OR (user_id = ? AND friend_id = ?)
+            `, [req.user.id, user.id, user.id, req.user.id]);
+
+            if (relation) {
+                if (relation.status === 'accepted') {
+                    friendshipStatus = 'accepted';
+                } else if (relation.status === 'pending') {
+                    friendshipStatus = relation.user_id === req.user.id ? 'pending_sent' : 'pending_received';
+                    requestId = relation.id;
+                } else {
+                    friendshipStatus = relation.status;
+                }
+            }
+        }
+
+        return res.json({
+            ...user,
+            friendshipStatus,
+            requestId
+        });
     } catch (err) {
         console.error('Erro ao obter usuário:', err);
         return res.status(500).json({ error: 'Erro ao obter usuário.' });

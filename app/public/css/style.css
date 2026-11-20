@@ -1357,3 +1357,135 @@ body {
     60% { transform: scale(1.05); }
     100% { transform: scale(1); opacity: 1; }
 }
+
+
+/* ===================================================================
+   EDITOR DE AVATAR E CARTÃO DE PERFIL DO USUÁRIO
+   =================================================================== */
+.clickable-user {
+    cursor: pointer;
+}
+
+.message-author.clickable-user:hover {
+    text-decoration: underline;
+}
+
+.profile-avatar-editor {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+}
+
+.profile-avatar-preview-img {
+    width: 88px;
+    height: 88px;
+    border-radius: var(--radius-full);
+    object-fit: cover;
+    border: 3px solid var(--accent-pink);
+    box-shadow: var(--shadow-sm);
+}
+
+.user-profile-modal-card {
+    max-width: 380px;
+}
+
+.user-card-body {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.user-card-header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+
+.user-card-avatar-wrap {
+    position: relative;
+    width: 78px;
+    height: 78px;
+    flex-shrink: 0;
+}
+
+.user-card-avatar-img {
+    width: 78px;
+    height: 78px;
+    border-radius: var(--radius-full);
+    object-fit: cover;
+    border: 3px solid var(--accent-pink);
+    cursor: zoom-in;
+}
+
+.user-card-identity {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    overflow: hidden;
+}
+
+.user-card-identity h3 {
+    margin: 0;
+    font-size: 1.12rem;
+    font-weight: 800;
+}
+
+.user-card-handle {
+    font-size: 0.84rem;
+    color: var(--text-muted);
+}
+
+.user-card-role {
+    align-self: flex-start;
+    margin-top: 2px;
+    padding: 2px 8px;
+    border-radius: var(--radius-full);
+    font-size: 0.7rem;
+    font-weight: 700;
+}
+
+.user-card-role.ceo {
+    background: linear-gradient(135deg, #fef08a, #fde047);
+    color: #854d0e;
+    border: 1px solid #eab308;
+}
+
+.user-card-role.admin {
+    background: #f3e8ff;
+    color: #7e22ce;
+}
+
+.user-card-role.moderator {
+    background: #e1effe;
+    color: #1e429f;
+}
+
+.user-card-bio-box {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 10px 12px;
+}
+
+.user-card-bio-box small {
+    display: block;
+    font-size: 0.68rem;
+    font-weight: 700;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+    letter-spacing: 0.04em;
+}
+
+.user-card-bio-box p {
+    margin: 0;
+    font-size: 0.88rem;
+    color: var(--text-primary);
+    white-space: pre-wrap;
+}
+
+.user-card-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}

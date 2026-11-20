@@ -437,6 +437,13 @@
                     <button class="modal-close" data-close="modal-profile">✕</button>
                 </div>
                 <form id="form-edit-profile" class="modal-body">
+                    <div class="form-group" style="align-items: center; text-align: center;">
+                        <div class="profile-avatar-editor">
+                            <img id="profile-avatar-preview" src="/assets/default-avatar.png" alt="Avatar" class="profile-avatar-preview-img">
+                            <input type="file" id="profile-avatar-input" accept="image/*" style="display: none;">
+                            <button type="button" class="btn btn-secondary btn-sm" id="btn-change-avatar">📷 Alterar Imagem de Perfil</button>
+                        </div>
+                    </div>
                     <div class="form-group">
                         <label>Nome de Exibição</label>
                         <input type="text" id="profile-display-name">
@@ -459,6 +466,36 @@
                         <button type="button" class="btn btn-danger" id="btn-logout">Sair da Conta</button>
                     </div>
                 </form>
+            </div>
+        </div>
+
+        <!-- Modal: Cartão de Perfil de Usuário (ao clicar em um usuário) -->
+        <div id="modal-user-card" class="modal-overlay" style="display: none;">
+            <div class="modal-card user-profile-modal-card">
+                <div class="modal-header">
+                    <h3>Perfil do Usuário</h3>
+                    <button class="modal-close" data-close="modal-user-card">✕</button>
+                </div>
+                <div class="modal-body user-card-body">
+                    <div class="user-card-header">
+                        <div class="user-card-avatar-wrap">
+                            <img id="user-card-avatar" src="/assets/default-avatar.png" alt="Avatar" class="user-card-avatar-img">
+                            <span id="user-card-status-dot" class="status-indicator online"></span>
+                        </div>
+                        <div class="user-card-identity">
+                            <h3 id="user-card-display-name">Usuário</h3>
+                            <span id="user-card-username" class="user-card-handle">@usuario</span>
+                            <span id="user-card-role-badge" class="user-card-role" style="display: none;"></span>
+                        </div>
+                    </div>
+                    <div class="user-card-bio-box">
+                        <small>SOBRE</small>
+                        <p id="user-card-bio">Sem descrição.</p>
+                    </div>
+                    <div class="user-card-actions" id="user-card-actions">
+                        <!-- Botões dinâmicos: Adicionar Amigo ou Enviar Mensagem -->
+                    </div>
+                </div>
             </div>
         </div>
 

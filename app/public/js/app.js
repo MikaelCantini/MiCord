@@ -208,6 +208,135 @@ const App = {
         window.ChatManager.openDM(friendId, friendName);
     },
 
+    // Abre o cartão de perfil ao clicar em um usuário (foto, bio, Adicionar Amigo / Enviar Mensagem)
+    async openUserProfileModal(userId) {
+        const token = window.AuthManager ? window.AuthManager.token : null;
+        if (!token || !userId) return;
+
+        try {
+            const res = await fetch(`/api/users/${userId}`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (!res.ok) return;
+            const user = await res.json();
+
+            const avatarEl = document.getElementById('user-card-avatar');
+            const avatarSrc = user.avatar_url || '/assets/default-avatar.png';
+            if (avatarEl) {
+                avatarEl.src = avatarSrc;
+                avatarEl.onclick = () => {
+                    if (window.ChatManager) window.ChatManager.openLightbox(avatarSrc);
+                };
+            }
+
+            const statusDot = document.getElementById('user-card-status-dot');
+            if (statusDot) statusDot.className = `status-indicator ${user.status || 'offline'}`;
+
+            document.getElementById('user-card-display-name').textContent = user.display_name || user.username;
+            document.getElementById('user-card-username').textContent = `@${user.username}`;
+
+            const roleBadge = document.getElementById('user-card-role-badge');
+            if (roleBadge) {
+                if (user.role === 'ceo') {
+                    roleBadge.textContent = '👑 CEO';
+                    roleBadge.className = 'user-card-role ceo';
+                    roleBadge.style.display = 'inline-block';
+                } else if (user.role === 'admin') {
+                    roleBadge.textContent = '🛡️ Admin';
+                    roleBadge.className = 'user-card-role admin';
+                    roleBadge.style.display = 'inline-block';
+                } else if (user.role === 'moderator') {
+                    roleBadge.textContent = '⭐ Moderador';
+                    roleBadge.className = 'user-card-role moderator';
+                    roleBadge.style.display = 'inline-block';
+                } else {
+                    roleBadge.style.display = 'none';
+                }
+            }
+
+            document.getElementById('user-card-bio').textContent = user.bio && user.bio.trim() ? user.bio : 'Sem descrição.';
+
+            const actionsEl = document.getElementById('user-card-actions');
+            actionsEl.innerHTML = '';
+
+            if (user.friendshipStatus === 'self') {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'btn btn-primary btn-block';
+                btn.textContent = '⚙️ Editar Meu Perfil';
+                btn.onclick = () => {
+                    document.getElementById('modal-user-card').style.display = 'none';
+                    window.AuthManager.openProfileModal();
+                };
+                actionsEl.appendChild(btn);
+            } else if (user.friendshipStatus === 'accepted') {
+                const msgBtn = document.createElement('button');
+                msgBtn.type = 'button';
+                msgBtn.className = 'btn btn-primary btn-block';
+                msgBtn.textContent = '💬 Enviar Mensagem';
+                msgBtn.onclick = () => {
+                    document.getElementById('modal-user-card').style.display = 'none';
+                    this.openDM(user.id, user.display_name || user.username);
+                };
+                actionsEl.appendChild(msgBtn);
+            } else if (user.friendshipStatus === 'pending_sent') {
+                const pendingBtn = document.createElement('button');
+                pendingBtn.type = 'button';
+                pendingBtn.className = 'btn btn-secondary btn-block';
+                pendingBtn.disabled = true;
+                pendingBtn.textContent = '⏳ Solicitação de Amizade Enviada';
+                actionsEl.appendChild(pendingBtn);
+            } else if (user.friendshipStatus === 'pending_received') {
+                const acceptBtn = document.createElement('button');
+                acceptBtn.type = 'button';
+                acceptBtn.className = 'btn btn-primary btn-block';
+                acceptBtn.textContent = '✓ Aceitar Convite de Amizade';
+                acceptBtn.onclick = async () => {
+                    await window.FriendsManager.respondRequest(user.requestId, 'accept');
+                    await this.openUserProfileModal(user.id);
+                };
+                actionsEl.appendChild(acceptBtn);
+            } else {
+                const addBtn = document.createElement('button');
+                addBtn.type = 'button';
+                addBtn.className = 'btn btn-primary btn-block';
+                addBtn.textContent = '🤝 Adicionar Amigo';
+                addBtn.onclick = async () => {
+                    addBtn.disabled = true;
+                    addBtn.textContent = 'Enviando...';
+                    try {
+                        const r = await fetch('/api/friends/request', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': `Bearer ${token}`
+                            },
+                            body: JSON.stringify({ target: user.username })
+                        });
+                        const data = await r.json();
+                        if (r.ok) {
+                            this.showToast(data.message || 'Solicitação de amizade enviada!');
+                            if (window.FriendsManager) window.FriendsManager.loadFriendsData();
+                            await this.openUserProfileModal(user.id);
+                        } else {
+                            this.showToast(data.error || 'Não foi possível enviar solicitação.');
+                            addBtn.disabled = false;
+                            addBtn.textContent = '🤝 Adicionar Amigo';
+                        }
+                    } catch (err) {
+                        addBtn.disabled = false;
+                        addBtn.textContent = '🤝 Adicionar Amigo';
+                    }
+                };
+                actionsEl.appendChild(addBtn);
+            }
+
+            document.getElementById('modal-user-card').style.display = 'flex';
+        } catch (err) {
+            console.error('Erro ao abrir perfil do usuário:', err);
+        }
+    },
+
     showToast(message) {
         const container = document.getElementById('toast-container');
         if (!container) return;

@@ -166,10 +166,10 @@ const ChatManager = {
         }
 
         div.innerHTML = `
-            <img src="${msg.avatar_url || '/assets/default-avatar.png'}" class="message-avatar" alt="${msg.display_name}">
+            <img src="${msg.avatar_url || '/assets/default-avatar.png'}" class="message-avatar clickable-user" alt="${msg.display_name}" title="Ver perfil" onclick="window.App.openUserProfileModal(${msg.sender_id})">
             <div class="message-body">
                 <div class="message-header">
-                    <span class="message-author">${msg.display_name || msg.username}</span>
+                    <span class="message-author clickable-user" title="Ver perfil" onclick="window.App.openUserProfileModal(${msg.sender_id})">${msg.display_name || msg.username}</span>
                     <span class="message-time">${timeStr}</span>
                 </div>
                 ${msg.content ? `<div class="message-text">${this.formatMessageText(msg.content)}</div>` : ''}

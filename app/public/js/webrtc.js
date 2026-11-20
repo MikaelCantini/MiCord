@@ -32,6 +32,8 @@ const WebRTCManager = {
     hiddenMedia: new Map(),
     // Popover de volume aberto atualmente (socketId ou null)
     openVolumePopoverId: null,
+    // Transmissão priorizada/fixada ('self', socketId ou null)
+    pinnedSocketId: null,
 
     // Detecção de voz (AudioContext)
     audioContext: null,
@@ -295,6 +297,8 @@ const WebRTCManager = {
         // Recebimento de Stream remoto (Áudio da voz, Áudio da transmissão, Vídeo ou Tela)
         pc.ontrack = (event) => {
             const track = event.track;
+            const incomingStream = event.streams && event.streams[0];
+            const incomingStreamId = incomingStream ? incomingStream.id : null;
             const peerData = this.peersData.get(targetSocketId);
             if (!peerData) return;
 
@@ -303,26 +307,55 @@ const WebRTCManager = {
             if (!peerData.videoTracks) peerData.videoTracks = [];
 
             if (track.kind === 'audio') {
-                const liveVoiceTracks = peerData.voiceAudioStream.getAudioTracks().filter(t => t.readyState === 'live');
+                track._streamId = incomingStreamId;
+
+                // Limpa tracks encerrados ou mudos antigos
+                peerData.voiceAudioStream.getAudioTracks().forEach(t => {
+                    if (t.readyState !== 'live') peerData.voiceAudioStream.removeTrack(t);
+                });
+                peerData.screenAudioStream.getAudioTracks().forEach(t => {
+                    if (t.readyState !== 'live') peerData.screenAudioStream.removeTrack(t);
+                });
+
+                const hasVideoInStream = incomingStream ? incomingStream.getVideoTracks().length > 0 : false;
+                const matchesScreenStream = Boolean(
+                    hasVideoInStream ||
+                    (peerData.screenStreamId && incomingStreamId && peerData.screenStreamId === incomingStreamId)
+                );
+                const hasLiveVoiceTrack = peerData.voiceAudioStream.getAudioTracks().some(t => t.readyState === 'live' && !t.muted);
+
                 const isAlreadyVoice = peerData.voiceAudioStream.getAudioTracks().some(t => t.id === track.id);
                 const isAlreadyScreen = peerData.screenAudioStream.getAudioTracks().some(t => t.id === track.id);
 
                 if (!isAlreadyVoice && !isAlreadyScreen) {
-                    if (liveVoiceTracks.length === 0) {
-                        peerData.voiceAudioStream.addTrack(track);
-                        track.onended = () => {
-                            peerData.voiceAudioStream.removeTrack(track);
-                            this.renderAllTiles();
-                        };
-                    } else {
+                    if (matchesScreenStream || hasLiveVoiceTrack) {
                         peerData.screenAudioStream.addTrack(track);
                         track.onended = () => {
                             peerData.screenAudioStream.removeTrack(track);
                             this.renderAllTiles();
                         };
+                    } else {
+                        peerData.voiceAudioStream.addTrack(track);
+                        track.onended = () => {
+                            peerData.voiceAudioStream.removeTrack(track);
+                            this.renderAllTiles();
+                        };
                     }
                 }
             } else if (track.kind === 'video') {
+                // Se o stream de vídeo também tem áudio (ou é a transmissão de tela), garante que o áudio vá para screenAudioStream
+                if (incomingStreamId && (peerData.hasScreen || (incomingStream && incomingStream.getAudioTracks().length > 0))) {
+                    peerData.screenStreamId = incomingStreamId;
+                    peerData.voiceAudioStream.getAudioTracks().forEach(t => {
+                        if (t._streamId === incomingStreamId) {
+                            peerData.voiceAudioStream.removeTrack(t);
+                            if (!peerData.screenAudioStream.getAudioTracks().some(st => st.id === t.id)) {
+                                peerData.screenAudioStream.addTrack(t);
+                            }
+                        }
+                    });
+                }
+
                 // Remove tracks encerrados e adiciona o novo track de vídeo/tela
                 peerData.videoTracks = peerData.videoTracks.filter(t => t.readyState === 'live' && t.id !== track.id);
                 peerData.videoTracks.push(track);
@@ -534,7 +567,14 @@ const WebRTCManager = {
         const screenBtn = document.getElementById('webrtc-screen-btn');
         if (screenBtn) screenBtn.classList.toggle('active', this.isScreenSharing);
 
-        this.socket.emit('voice:state-update', { hasScreen: this.isScreenSharing });
+        if (!this.isScreenSharing && this.pinnedSocketId === 'self') {
+            this.pinnedSocketId = null;
+        }
+
+        this.socket.emit('voice:state-update', {
+            hasScreen: this.isScreenSharing,
+            screenStreamId: this.isScreenSharing && this.localScreenStream ? this.localScreenStream.id : null
+        });
         this.renderAllTiles();
     },
 
@@ -603,11 +643,18 @@ const WebRTCManager = {
         selfTile.className = `participant-tile ${this.isSpeaking ? 'speaking' : ''}`;
         
         let selfMediaHtml = '';
+        let selfTopButtons = '';
+        const selfIsPinned = this.pinnedSocketId === 'self';
+
         if (this.isScreenSharing && this.localScreenStream) {
             selfTile.classList.add('featured-screen');
+            if (selfIsPinned) selfTile.classList.add('pinned-screen');
             selfMediaHtml = `<video class="participant-video screen-share" id="self-screen-video" autoplay muted playsinline></video>`;
+            selfTopButtons += `<button type="button" class="tile-action-btn ${selfIsPinned ? 'pinned-active' : ''}" onclick="WebRTCManager.togglePinScreen('self')" title="${selfIsPinned ? 'Remover prioridade' : 'Priorizar esta transmissão (deixar maior)'}">${selfIsPinned ? '📌 Priorizada' : '📌 Priorizar'}</button>`;
+            selfTopButtons += `<button type="button" class="tile-action-btn" onclick="WebRTCManager.toggleFullscreen('peer-tile-self')" title="Tela cheia">⛶ Tela Cheia</button>`;
         } else if (this.isVideoOn && this.localVideoStream) {
             selfMediaHtml = `<video class="participant-video" id="self-cam-video" autoplay muted playsinline></video>`;
+            selfTopButtons += `<button type="button" class="tile-action-btn" onclick="WebRTCManager.toggleFullscreen('peer-tile-self')" title="Tela cheia">⛶</button>`;
         } else {
             selfMediaHtml = `
                 <div class="participant-avatar-view">
@@ -618,6 +665,7 @@ const WebRTCManager = {
 
         selfTile.innerHTML = `
             ${selfMediaHtml}
+            ${selfTopButtons ? `<div class="tile-top-actions">${selfTopButtons}</div>` : ''}
             <div class="participant-overlay">
                 <span class="participant-tag">Você ${this.isScreenSharing ? '(Tela)' : ''}</span>
                 <div class="participant-icons">
@@ -655,31 +703,41 @@ const WebRTCManager = {
             const isScreen = Boolean(peer.hasScreen);
             const isHiddenLocally = isScreen ? hidden.screen : hidden.video;
             const showVideo = hasLiveVideo && !isHiddenLocally;
+            const isPinned = this.pinnedSocketId === socketId && showVideo && isScreen;
 
             const hasScreenAudio = peer.screenAudioStream && peer.screenAudioStream.getAudioTracks().some(t => t.readyState === 'live');
+            const profileClickAttr = pUser.id ? `onclick="window.App.openUserProfileModal(${pUser.id})"` : '';
 
             let peerMediaHtml = '';
             if (showVideo) {
                 if (isScreen) peerTile.classList.add('featured-screen');
+                if (isPinned) peerTile.classList.add('pinned-screen');
                 peerMediaHtml = `<video class="participant-video ${isScreen ? 'screen-share' : ''}" id="video-${socketId}" autoplay muted playsinline></video>`;
             } else {
                 peerMediaHtml = `
                     <div class="participant-avatar-view">
-                        <img src="${pUser.avatar_url || '/assets/default-avatar.png'}" alt="${pUser.display_name}">
+                        <img src="${pUser.avatar_url || '/assets/default-avatar.png'}" alt="${pUser.display_name}" class="clickable-user" title="Ver perfil" ${profileClickAttr}>
                         ${hasLiveVideo && isHiddenLocally ? `<small style="color: var(--text-muted); font-weight: 600;">${isScreen ? 'Transmissão oculta' : 'Câmera oculta'}</small>` : ''}
                     </div>
                 `;
             }
 
-            // Botões de ação no topo direito do tile (Volume, Fechar Tela / Câmera, e Moderação)
+            // Botões de ação no topo direito do tile (Priorizar, Tela Cheia, Volume, Fechar Tela / Câmera, e Moderação)
             let topButtonsHtml = '';
             if (hasLiveVideo) {
                 if (isScreen) {
+                    if (!hidden.screen) {
+                        topButtonsHtml += `<button type="button" class="tile-action-btn ${isPinned ? 'pinned-active' : ''}" onclick="WebRTCManager.togglePinScreen('${socketId}')" title="${isPinned ? 'Remover prioridade' : 'Priorizar esta transmissão (deixar maior)'}">${isPinned ? '📌 Priorizada' : '📌 Priorizar'}</button>`;
+                        topButtonsHtml += `<button type="button" class="tile-action-btn" onclick="WebRTCManager.toggleFullscreen('peer-tile-${socketId}')" title="Tela cheia">⛶ Tela Cheia</button>`;
+                    }
                     topButtonsHtml += `<button type="button" class="tile-action-btn" onclick="WebRTCManager.toggleHidePeerMedia('${socketId}', 'screen')" title="${hidden.screen ? 'Abrir transmissão' : 'Fechar transmissão para mim'}">${hidden.screen ? '🖥️ Ver Tela' : '✕ Fechar Tela'}</button>`;
                     if (canModerate) {
                         topButtonsHtml += `<button type="button" class="tile-action-btn danger-action" onclick="WebRTCManager.forceStopPeerMedia('${socketId}', 'screen')" title="Encerrar transmissão para todos">🛑 Encerrar</button>`;
                     }
                 } else {
+                    if (!hidden.video) {
+                        topButtonsHtml += `<button type="button" class="tile-action-btn" onclick="WebRTCManager.toggleFullscreen('peer-tile-${socketId}')" title="Tela cheia">⛶</button>`;
+                    }
                     topButtonsHtml += `<button type="button" class="tile-action-btn" onclick="WebRTCManager.toggleHidePeerMedia('${socketId}', 'video')" title="${hidden.video ? 'Mostrar câmera' : 'Fechar câmera para mim'}">${hidden.video ? '📹 Ver Câmera' : '✕ Fechar Câmera'}</button>`;
                     if (canModerate) {
                         topButtonsHtml += `<button type="button" class="tile-action-btn danger-action" onclick="WebRTCManager.forceStopPeerMedia('${socketId}', 'video')" title="Desligar câmera para todos">🛑 Desligar</button>`;
@@ -718,7 +776,7 @@ const WebRTCManager = {
                 <div class="tile-top-actions">${topButtonsHtml}</div>
                 ${volumePopoverHtml}
                 <div class="participant-overlay">
-                    <span class="participant-tag">${pUser.display_name || pUser.username} ${peer.hasScreen ? '(Tela)' : ''}</span>
+                    <span class="participant-tag clickable-user" title="Ver perfil" ${profileClickAttr}>${pUser.display_name || pUser.username} ${peer.hasScreen ? '(Tela)' : ''}</span>
                     <div class="participant-icons">
                         ${peer.isMuted ? '<span class="state-pill">🔇</span>' : ''}
                         ${peer.hasVideo ? '<span class="state-pill">📹</span>' : ''}
@@ -742,7 +800,7 @@ const WebRTCManager = {
                 if (audVoice) {
                     audVoice.srcObject = peer.voiceAudioStream;
                     audVoice.volume = vols.voice;
-                    audVoice.muted = this.isDeafened;
+                    audVoice.muted = this.isDeafened || vols.voice === 0;
                     audVoice.play().catch(() => {});
                 }
             }
@@ -752,7 +810,7 @@ const WebRTCManager = {
                 if (audScreen) {
                     audScreen.srcObject = peer.screenAudioStream;
                     audScreen.volume = vols.screen;
-                    audScreen.muted = this.isDeafened || hidden.screen;
+                    audScreen.muted = this.isDeafened || hidden.screen || vols.screen === 0;
                     audScreen.play().catch(() => {});
                 }
             }
@@ -763,6 +821,24 @@ const WebRTCManager = {
         const countBadge = document.getElementById('webrtc-participants-count');
         if (countBadge) {
             countBadge.textContent = `${count} participante${count > 1 ? 's' : ''}`;
+        }
+    },
+
+    togglePinScreen(targetId) {
+        this.pinnedSocketId = this.pinnedSocketId === targetId ? null : targetId;
+        this.renderAllTiles();
+    },
+
+    toggleFullscreen(tileId) {
+        const el = document.getElementById(tileId);
+        if (!el) return;
+
+        if (document.fullscreenElement || document.webkitFullscreenElement) {
+            if (document.exitFullscreen) document.exitFullscreen();
+            else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+        } else {
+            if (el.requestFullscreen) el.requestFullscreen().catch(() => {});
+            else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
         }
     },
 
@@ -782,14 +858,21 @@ const WebRTCManager = {
         const labelEl = document.getElementById(`vol-${kind}-label-${socketId}`);
         if (labelEl) labelEl.textContent = `${Math.round(vol * 100)}%`;
 
+        const hidden = this.hiddenMedia.get(socketId) || { screen: false, video: false };
         const audioEl = document.getElementById(`audio-${kind}-${socketId}`);
-        if (audioEl) audioEl.volume = vol;
+        if (audioEl) {
+            audioEl.volume = vol;
+            audioEl.muted = this.isDeafened || vol === 0 || (kind === 'screen' && hidden.screen);
+        }
     },
 
     toggleHidePeerMedia(socketId, kind) {
         const current = this.hiddenMedia.get(socketId) || { screen: false, video: false };
         current[kind] = !current[kind];
         this.hiddenMedia.set(socketId, current);
+        if (kind === 'screen' && current.screen && this.pinnedSocketId === socketId) {
+            this.pinnedSocketId = null;
+        }
         this.renderAllTiles();
     },
 
@@ -812,6 +895,7 @@ const WebRTCManager = {
         this.peerVolumes.delete(socketId);
         this.hiddenMedia.delete(socketId);
         if (this.openVolumePopoverId === socketId) this.openVolumePopoverId = null;
+        if (this.pinnedSocketId === socketId) this.pinnedSocketId = null;
         this.peersData.delete(socketId);
         this.renderAllTiles();
     },
@@ -864,6 +948,7 @@ const WebRTCManager = {
         this.peerVolumes.clear();
         this.hiddenMedia.clear();
         this.openVolumePopoverId = null;
+        this.pinnedSocketId = null;
         this.peersData.clear();
 
         // Volta para a visualização padrão

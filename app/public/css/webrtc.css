@@ -171,6 +171,52 @@
     max-height: 460px;
 }
 
+/* Transmissão priorizada / fixada: fica maior no topo, mesmo com várias telas abertas */
+.participant-tile.pinned-screen,
+.video-grid.multi-screen .participant-tile.pinned-screen {
+    grid-column: 1 / -1;
+    order: -1;
+    aspect-ratio: auto;
+    height: min(64vh, 600px);
+    min-height: 300px;
+    max-height: none;
+    border-color: var(--accent-pink);
+}
+
+/* Modo Tela Cheia (Fullscreen) da transmissão */
+.participant-tile:fullscreen,
+.participant-tile:-webkit-full-screen {
+    width: 100vw;
+    height: 100vh;
+    max-height: none;
+    border: none;
+    border-radius: 0;
+    background: #000000;
+}
+
+.participant-tile:fullscreen .participant-video,
+.participant-tile:-webkit-full-screen .participant-video {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+
+.participant-tag.clickable-user {
+    pointer-events: auto;
+    cursor: pointer;
+}
+
+.participant-tag.clickable-user:hover {
+    background: rgba(0, 0, 0, 0.85);
+    text-decoration: underline;
+}
+
+.tile-action-btn.pinned-active {
+    background: var(--accent-pink);
+    border-color: var(--accent-pink);
+    color: #ffffff;
+}
+
 /* Barra superior de controles por participante (Volume / Fechar Tela / Fechar Câmera) */
 .tile-top-actions {
     position: absolute;

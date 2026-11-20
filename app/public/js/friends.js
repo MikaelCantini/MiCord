@@ -108,7 +108,7 @@ const FriendsManager = {
             const row = document.createElement('div');
             row.className = 'friend-row';
             row.innerHTML = `
-                <div class="friend-info">
+                <div class="friend-info clickable-user" title="Ver perfil" onclick="window.App.openUserProfileModal(${friend.id})">
                     <div class="avatar-wrapper">
                         <img src="${friend.avatar_url || '/assets/default-avatar.png'}" class="friend-avatar" alt="${friend.display_name}">
                         <span class="status-indicator ${friend.status}"></span>
