@@ -26,11 +26,12 @@ const WebRTCManager = {
     pendingCandidates: new Map(),
     // Controle de negociação simultânea (glare)
     makingOffer: new Map(),
-    // Volumes individuais por participante: Map<socketId, { voice: number, screen: number }>
+    // Volumes individuais por participante (persistidos no localStorage por userId)
     peerVolumes: new Map(),
+    savedUserVolumes: {},
     // Mídias ocultadas localmente por participante: Map<socketId, { screen: boolean, video: boolean }>
     hiddenMedia: new Map(),
-    // Popover de volume aberto atualmente (socketId ou null)
+    // Popover de volume aberto atualmente (id do popover ou null)
     openVolumePopoverId: null,
     // Transmissão priorizada/fixada ('self', socketId ou null)
     pinnedSocketId: null,
@@ -52,8 +53,50 @@ const WebRTCManager = {
 
     init(socket) {
         this.socket = socket;
+        this.loadSavedVolumes();
         this.bindSocketEvents();
         this.bindUIEvents();
+    },
+
+    loadSavedVolumes() {
+        try {
+            const raw = localStorage.getItem('micord_peer_volumes');
+            this.savedUserVolumes = raw ? JSON.parse(raw) : {};
+        } catch (e) {
+            this.savedUserVolumes = {};
+        }
+    },
+
+    saveUserVolumePref(userId, vols) {
+        if (!userId) return;
+        this.savedUserVolumes[String(userId)] = {
+            voice: vols.voice,
+            screen: vols.screen
+        };
+        try {
+            localStorage.setItem('micord_peer_volumes', JSON.stringify(this.savedUserVolumes));
+        } catch (e) {}
+    },
+
+    getPeerVolume(socketId) {
+        const existing = this.peerVolumes.get(socketId);
+        if (existing) return existing;
+
+        const peer = this.peersData.get(socketId);
+        const userId = peer?.user?.id;
+        if (userId && this.savedUserVolumes[String(userId)]) {
+            const saved = this.savedUserVolumes[String(userId)];
+            const vols = {
+                voice: typeof saved.voice === 'number' ? saved.voice : 1,
+                screen: typeof saved.screen === 'number' ? saved.screen : 1
+            };
+            this.peerVolumes.set(socketId, vols);
+            return vols;
+        }
+
+        const def = { voice: 1, screen: 1 };
+        this.peerVolumes.set(socketId, def);
+        return def;
     },
 
     bindUIEvents() {
@@ -134,6 +177,7 @@ const WebRTCManager = {
             }
 
             let pc = this.peerConnections.get(fromSocketId);
+            const wasNewConnection = !pc;
             if (!pc) {
                 pc = await this.initiatePeerConnection(fromSocketId, false);
             }
@@ -164,6 +208,19 @@ const WebRTCManager = {
                         toSocketId: fromSocketId,
                         signal: pc.localDescription
                     });
+
+                    // Se o novo peer enviou oferta só de áudio e nós já estamos com webcam ou tela ativa,
+                    // renegociamos enviando uma nova oferta para entregar nossos tracks de vídeo/tela
+                    if (wasNewConnection && (this.isVideoOn || this.isScreenSharing)) {
+                        this.socket.emit('voice:state-update', {
+                            micStreamId: this.localAudioStream ? this.localAudioStream.id : null,
+                            camStreamId: this.isVideoOn && this.localVideoStream ? this.localVideoStream.id : null,
+                            screenStreamId: this.isScreenSharing && this.localScreenStream ? this.localScreenStream.id : null,
+                            hasScreen: this.isScreenSharing,
+                            hasVideo: this.isVideoOn
+                        });
+                        setTimeout(() => this.renegotiatePeer(fromSocketId), 150);
+                    }
                 } else if (signal.type === 'answer') {
                     if (pc.signalingState === 'have-local-offer') {
                         await pc.setRemoteDescription(new RTCSessionDescription(signal));
@@ -796,7 +853,7 @@ const WebRTCManager = {
         // 2. Tiles dos outros participantes
         this.peersData.forEach((peer, socketId) => {
             const pUser = peer.user || { username: 'Amigo', display_name: 'Amigo' };
-            const vols = this.peerVolumes.get(socketId) || { voice: 1, screen: 1 };
+            const vols = this.getPeerVolume(socketId);
             const hidden = this.hiddenMedia.get(socketId) || { screen: false, video: false };
 
             const hasLiveCam = Boolean(
@@ -812,7 +869,8 @@ const WebRTCManager = {
             const profileClickAttr = pUser.id ? `onclick="window.App.openUserProfileModal(${pUser.id})"` : '';
             const voicePct = Math.round(vols.voice * 100);
             const screenPct = Math.round(vols.screen * 100);
-            const isPopoverOpen = this.openVolumePopoverId === socketId;
+            const isVoicePopoverOpen = this.openVolumePopoverId === `voice-${socketId}`;
+            const isScreenPopoverOpen = this.openVolumePopoverId === `screen-${socketId}`;
 
             // 2A. Tile dedicado à TRANSMISSÃO DE TELA do participante (quando ativa e não oculta)
             if (hasLiveScreen && !hidden.screen) {
@@ -824,15 +882,26 @@ const WebRTCManager = {
                 let screenButtons = `
                     <button type="button" class="tile-action-btn ${isPinned ? 'pinned-active' : ''}" onclick="WebRTCManager.togglePinScreen('${socketId}')" title="${isPinned ? 'Remover prioridade' : 'Priorizar esta transmissão (deixar maior)'}">${isPinned ? '📌 Priorizada' : '📌 Priorizar'}</button>
                     <button type="button" class="tile-action-btn" onclick="WebRTCManager.toggleFullscreen('peer-tile-${socketId}-screen')" title="Tela cheia">⛶ Tela Cheia</button>
+                    <button type="button" class="tile-action-btn" onclick="WebRTCManager.toggleVolumePopover('screen-${socketId}')" title="Ajustar volume da transmissão">🔊 ${screenPct}%</button>
                     <button type="button" class="tile-action-btn" onclick="WebRTCManager.toggleHidePeerMedia('${socketId}', 'screen')" title="Fechar transmissão para mim">✕ Fechar Tela</button>
                 `;
                 if (canModerate) {
                     screenButtons += `<button type="button" class="tile-action-btn danger-action" onclick="WebRTCManager.forceStopPeerMedia('${socketId}', 'screen')" title="Encerrar transmissão para todos">🛑 Encerrar</button>`;
                 }
 
+                const screenVolumePopoverHtml = `
+                    <div class="tile-volume-popover ${isScreenPopoverOpen ? 'open' : ''}" id="vol-popover-screen-${socketId}">
+                        <div class="volume-control-row">
+                            <label><span>🖥️ Volume da Transmissão</span><span class="vol-screen-label-${socketId}">${screenPct}%</span></label>
+                            <input type="range" min="0" max="100" value="${screenPct}" class="volume-slider vol-screen-slider-${socketId}" oninput="WebRTCManager.setPeerVolume('${socketId}', 'screen', this.value)">
+                        </div>
+                    </div>
+                `;
+
                 screenTile.innerHTML = `
                     <video class="participant-video screen-share" id="video-screen-${socketId}" autoplay muted playsinline></video>
                     <div class="tile-top-actions">${screenButtons}</div>
+                    ${screenVolumePopoverHtml}
                     <div class="participant-overlay">
                         <span class="participant-tag clickable-user" title="Ver perfil" ${profileClickAttr}>${pUser.display_name || pUser.username} (Tela)</span>
                         <div class="participant-icons">
@@ -880,19 +949,18 @@ const WebRTCManager = {
                     topButtonsHtml += `<button type="button" class="tile-action-btn danger-action" onclick="WebRTCManager.forceStopPeerMedia('${socketId}', 'video')" title="Desligar câmera para todos">🛑 Desligar</button>`;
                 }
             }
-            topButtonsHtml += `<button type="button" class="tile-action-btn" onclick="WebRTCManager.toggleVolumePopover('${socketId}')" title="Ajustar volume do usuário e da transmissão">🔊</button>`;
+            topButtonsHtml += `<button type="button" class="tile-action-btn" onclick="WebRTCManager.toggleVolumePopover('voice-${socketId}')" title="Ajustar volume do usuário e da transmissão">🔊</button>`;
 
             const volumePopoverHtml = `
-                <div class="tile-volume-popover ${isPopoverOpen ? 'open' : ''}" id="vol-popover-${socketId}">
+                <div class="tile-volume-popover ${isVoicePopoverOpen ? 'open' : ''}" id="vol-popover-voice-${socketId}">
                     <div class="volume-control-row">
-                        <label><span>🎙️ Voz do Usuário</span><span id="vol-voice-label-${socketId}">${voicePct}%</span></label>
-                        <input type="range" min="0" max="100" value="${voicePct}" class="volume-slider" oninput="WebRTCManager.setPeerVolume('${socketId}', 'voice', this.value)">
+                        <label><span>🎙️ Voz do Usuário</span><span class="vol-voice-label-${socketId}">${voicePct}%</span></label>
+                        <input type="range" min="0" max="100" value="${voicePct}" class="volume-slider vol-voice-slider-${socketId}" oninput="WebRTCManager.setPeerVolume('${socketId}', 'voice', this.value)">
                     </div>
-                    ${(hasLiveScreen || peer.hasScreen || hasScreenAudio) ? `
                     <div class="volume-control-row">
-                        <label><span>🖥️ Transmissão</span><span id="vol-screen-label-${socketId}">${screenPct}%</span></label>
-                        <input type="range" min="0" max="100" value="${screenPct}" class="volume-slider" oninput="WebRTCManager.setPeerVolume('${socketId}', 'screen', this.value)">
-                    </div>` : ''}
+                        <label><span>🖥️ Transmissão</span><span class="vol-screen-label-${socketId}">${screenPct}%</span></label>
+                        <input type="range" min="0" max="100" value="${screenPct}" class="volume-slider vol-screen-slider-${socketId}" oninput="WebRTCManager.setPeerVolume('${socketId}', 'screen', this.value)">
+                    </div>
                 </div>
             `;
 
@@ -972,8 +1040,8 @@ const WebRTCManager = {
         }
     },
 
-    toggleVolumePopover(socketId) {
-        this.openVolumePopoverId = this.openVolumePopoverId === socketId ? null : socketId;
+    toggleVolumePopover(popoverKey) {
+        this.openVolumePopoverId = this.openVolumePopoverId === popoverKey ? null : popoverKey;
         document.querySelectorAll('.tile-volume-popover').forEach(el => {
             el.classList.toggle('open', el.id === `vol-popover-${this.openVolumePopoverId}`);
         });
@@ -981,12 +1049,24 @@ const WebRTCManager = {
 
     setPeerVolume(socketId, kind, percentValue) {
         const vol = Math.max(0, Math.min(1, parseInt(percentValue, 10) / 100));
-        const current = this.peerVolumes.get(socketId) || { voice: 1, screen: 1 };
+        const pct = Math.round(vol * 100);
+        const current = this.getPeerVolume(socketId);
         current[kind] = vol;
         this.peerVolumes.set(socketId, current);
 
-        const labelEl = document.getElementById(`vol-${kind}-label-${socketId}`);
-        if (labelEl) labelEl.textContent = `${Math.round(vol * 100)}%`;
+        // Salva no localStorage pelo ID do usuário para lembrar nas próximas calls
+        const peer = this.peersData.get(socketId);
+        if (peer?.user?.id) {
+            this.saveUserVolumePref(peer.user.id, current);
+        }
+
+        // Sincroniza labels e sliders em ambos os popovers (card do usuário e card da transmissão)
+        document.querySelectorAll(`.vol-${kind}-label-${socketId}`).forEach(el => {
+            el.textContent = `${pct}%`;
+        });
+        document.querySelectorAll(`.vol-${kind}-slider-${socketId}`).forEach(el => {
+            if (el.value !== String(pct)) el.value = String(pct);
+        });
 
         const hidden = this.hiddenMedia.get(socketId) || { screen: false, video: false };
         const audioEl = document.getElementById(`audio-${kind}-${socketId}`);
