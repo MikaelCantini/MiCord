@@ -22,6 +22,10 @@ const WebRTCManager = {
     peerConnections: new Map(),
     // Informações dos peers Map<peerSocketId, { user, ... }>
     peersData: new Map(),
+    // Fila de ICE candidates antes da remoteDescription
+    pendingCandidates: new Map(),
+    // Controle de negociação simultânea (glare)
+    makingOffer: new Map(),
 
     // Detecção de voz (AudioContext)
     audioContext: null,
@@ -122,7 +126,24 @@ const WebRTCManager = {
 
             try {
                 if (signal.type === 'offer') {
-                    await pc.setRemoteDescription(new RTCSessionDescription(signal));
+                    const isPolite = this.socket.id < fromSocketId;
+                    const offerCollision = this.makingOffer.get(fromSocketId) || pc.signalingState !== 'stable';
+
+                    if (offerCollision && !isPolite) {
+                        return;
+                    }
+
+                    if (offerCollision && isPolite) {
+                        await Promise.all([
+                            pc.setLocalDescription({ type: 'rollback' }),
+                            pc.setRemoteDescription(new RTCSessionDescription(signal))
+                        ]);
+                    } else {
+                        await pc.setRemoteDescription(new RTCSessionDescription(signal));
+                    }
+
+                    await this.flushPendingCandidates(fromSocketId, pc);
+
                     const answer = await pc.createAnswer();
                     await pc.setLocalDescription(answer);
                     this.socket.emit('webrtc:signal', {
@@ -130,9 +151,18 @@ const WebRTCManager = {
                         signal: pc.localDescription
                     });
                 } else if (signal.type === 'answer') {
-                    await pc.setRemoteDescription(new RTCSessionDescription(signal));
+                    if (pc.signalingState === 'have-local-offer') {
+                        await pc.setRemoteDescription(new RTCSessionDescription(signal));
+                        await this.flushPendingCandidates(fromSocketId, pc);
+                    }
                 } else if (signal.candidate) {
-                    await pc.addIceCandidate(new RTCIceCandidate(signal.candidate));
+                    if (pc.remoteDescription && pc.remoteDescription.type) {
+                        await pc.addIceCandidate(new RTCIceCandidate(signal.candidate));
+                    } else {
+                        const queue = this.pendingCandidates.get(fromSocketId) || [];
+                        queue.push(signal.candidate);
+                        this.pendingCandidates.set(fromSocketId, queue);
+                    }
                 }
             } catch (err) {
                 console.error('[WebRTC] Erro no processamento de sinal:', err);
@@ -241,25 +271,89 @@ const WebRTCManager = {
 
         // Recebimento de Stream remoto (Áudio, Vídeo ou Tela)
         pc.ontrack = (event) => {
-            const [remoteStream] = event.streams;
+            const track = event.track;
             const peerData = this.peersData.get(targetSocketId);
-            if (peerData) {
-                peerData.stream = remoteStream;
-                this.renderAllTiles();
+            if (!peerData) return;
+
+            if (!peerData.audioStream) peerData.audioStream = new MediaStream();
+            if (!peerData.videoTracks) peerData.videoTracks = [];
+
+            if (track.kind === 'audio') {
+                const exists = peerData.audioStream.getAudioTracks().some(t => t.id === track.id);
+                if (!exists) {
+                    peerData.audioStream.addTrack(track);
+                }
+                track.onended = () => {
+                    peerData.audioStream.removeTrack(track);
+                };
+            } else if (track.kind === 'video') {
+                // Remove tracks encerrados e adiciona o novo track de vídeo/tela
+                peerData.videoTracks = peerData.videoTracks.filter(t => t.readyState === 'live' && t.id !== track.id);
+                peerData.videoTracks.push(track);
+                peerData.videoStream = new MediaStream([track]);
+
+                const handleVideoEnded = () => {
+                    peerData.videoTracks = peerData.videoTracks.filter(t => t.id !== track.id && t.readyState === 'live');
+                    const latestTrack = peerData.videoTracks[peerData.videoTracks.length - 1];
+                    peerData.videoStream = latestTrack ? new MediaStream([latestTrack]) : null;
+                    this.renderAllTiles();
+                };
+
+                track.onended = handleVideoEnded;
+                track.onmute = () => {
+                    const liveUnmuted = peerData.videoTracks.filter(t => t.readyState === 'live' && !t.muted);
+                    const latestTrack = liveUnmuted[liveUnmuted.length - 1];
+                    peerData.videoStream = latestTrack ? new MediaStream([latestTrack]) : null;
+                    this.renderAllTiles();
+                };
+                track.onunmute = () => {
+                    if (track.readyState === 'live') {
+                        peerData.videoStream = new MediaStream([track]);
+                        this.renderAllTiles();
+                    }
+                };
             }
+
+            this.renderAllTiles();
         };
 
         // Se nós formos os iniciadores da chamada para este peer, criamos o offer
         if (isInitiator) {
+            await this.renegotiatePeer(targetSocketId);
+        }
+
+        return pc;
+    },
+
+    async flushPendingCandidates(socketId, pc) {
+        const queue = this.pendingCandidates.get(socketId);
+        if (!queue || queue.length === 0) return;
+        this.pendingCandidates.delete(socketId);
+        for (const candidate of queue) {
+            try {
+                await pc.addIceCandidate(new RTCIceCandidate(candidate));
+            } catch (err) {
+                console.warn('[WebRTC] Erro ao aplicar ICE candidate enfileirado:', err);
+            }
+        }
+    },
+
+    async renegotiatePeer(targetSocketId) {
+        const pc = this.peerConnections.get(targetSocketId);
+        if (!pc) return;
+        try {
+            this.makingOffer.set(targetSocketId, true);
             const offer = await pc.createOffer();
             await pc.setLocalDescription(offer);
             this.socket.emit('webrtc:signal', {
                 toSocketId: targetSocketId,
                 signal: pc.localDescription
             });
+        } catch (err) {
+            console.error('[WebRTC] Erro ao renegociar conexão com peer:', err);
+        } finally {
+            this.makingOffer.set(targetSocketId, false);
         }
-
-        return pc;
     },
 
     // Detecção de voz em tempo real usando Web Audio API
@@ -341,8 +435,8 @@ const WebRTCManager = {
         if (this.isVideoOn) {
             // Desligar câmera
             if (this.localVideoStream) {
+                await this.removeTracksFromAllPeers(this.localVideoStream);
                 this.localVideoStream.getTracks().forEach(t => t.stop());
-                this.removeTracksFromAllPeers(this.localVideoStream);
                 this.localVideoStream = null;
             }
             this.isVideoOn = false;
@@ -353,7 +447,7 @@ const WebRTCManager = {
                     video: { width: { ideal: 1280 }, height: { ideal: 720 } },
                     audio: false
                 });
-                this.attachTracksToAllPeers(this.localVideoStream);
+                await this.attachTracksToAllPeers(this.localVideoStream);
                 this.isVideoOn = true;
             } catch (err) {
                 alert('Não foi possível acessar sua câmera.');
@@ -373,8 +467,8 @@ const WebRTCManager = {
         if (this.isScreenSharing) {
             // Parar compartilhamento de tela
             if (this.localScreenStream) {
+                await this.removeTracksFromAllPeers(this.localScreenStream);
                 this.localScreenStream.getTracks().forEach(t => t.stop());
-                this.removeTracksFromAllPeers(this.localScreenStream);
                 this.localScreenStream = null;
             }
             this.isScreenSharing = false;
@@ -388,10 +482,12 @@ const WebRTCManager = {
 
                 // Caso o usuário clique em "Parar Compartilhamento" nativo do navegador
                 this.localScreenStream.getVideoTracks()[0].onended = () => {
-                    this.toggleScreenShare();
+                    if (this.isScreenSharing) {
+                        this.toggleScreenShare();
+                    }
                 };
 
-                this.attachTracksToAllPeers(this.localScreenStream);
+                await this.attachTracksToAllPeers(this.localScreenStream);
                 this.isScreenSharing = true;
             } catch (err) {
                 console.warn('[WebRTC] Compartilhamento de tela cancelado pelo usuário.');
@@ -406,29 +502,41 @@ const WebRTCManager = {
         this.renderAllTiles();
     },
 
-    attachTracksToAllPeers(stream) {
+    async attachTracksToAllPeers(stream) {
+        const modifiedPeers = new Set();
         stream.getTracks().forEach(track => {
-            this.peerConnections.forEach(pc => {
+            this.peerConnections.forEach((pc, socketId) => {
                 const senders = pc.getSenders();
                 const exists = senders.some(s => s.track && s.track.id === track.id);
                 if (!exists) {
                     pc.addTrack(track, stream);
+                    modifiedPeers.add(socketId);
                 }
             });
         });
+
+        for (const socketId of modifiedPeers) {
+            await this.renegotiatePeer(socketId);
+        }
     },
 
-    removeTracksFromAllPeers(stream) {
+    async removeTracksFromAllPeers(stream) {
+        const modifiedPeers = new Set();
         stream.getTracks().forEach(track => {
-            this.peerConnections.forEach(pc => {
+            this.peerConnections.forEach((pc, socketId) => {
                 const senders = pc.getSenders();
                 senders.forEach(sender => {
                     if (sender.track && sender.track.id === track.id) {
                         pc.removeTrack(sender);
+                        modifiedPeers.add(socketId);
                     }
                 });
             });
         });
+
+        for (const socketId of modifiedPeers) {
+            await this.renegotiatePeer(socketId);
+        }
     },
 
     // Renderiza todos os cards de vídeo / participantes
@@ -487,10 +595,15 @@ const WebRTCManager = {
             peerTile.id = `peer-tile-${socketId}`;
             peerTile.className = `participant-tile ${peer.isSpeaking ? 'speaking' : ''}`;
 
+            const activeVideoTracks = peer.videoStream
+                ? peer.videoStream.getVideoTracks().filter(t => t.readyState === 'live' && !t.muted)
+                : [];
+            const hasLiveVideo = activeVideoTracks.length > 0;
+
             let peerMediaHtml = '';
-            if (peer.stream && (peer.hasVideo || peer.hasScreen)) {
+            if (hasLiveVideo) {
                 if (peer.hasScreen) peerTile.classList.add('featured-screen');
-                peerMediaHtml = `<video class="participant-video ${peer.hasScreen ? 'screen-share' : ''}" id="video-${socketId}" autoplay playsinline></video>`;
+                peerMediaHtml = `<video class="participant-video ${peer.hasScreen ? 'screen-share' : ''}" id="video-${socketId}" autoplay muted playsinline></video>`;
             } else {
                 peerMediaHtml = `
                     <div class="participant-avatar-view">
@@ -516,15 +629,21 @@ const WebRTCManager = {
             `;
             grid.appendChild(peerTile);
 
-            // Vincula streams remotos
-            if (peer.stream) {
+            // Vincula streams remotos (vídeo e áudio separados)
+            if (hasLiveVideo && peer.videoStream) {
                 const vid = document.getElementById(`video-${socketId}`);
-                if (vid) vid.srcObject = peer.stream;
-                
+                if (vid) {
+                    vid.srcObject = peer.videoStream;
+                    vid.play().catch(() => {});
+                }
+            }
+
+            if (peer.audioStream) {
                 const aud = document.getElementById(`audio-${socketId}`);
                 if (aud) {
-                    aud.srcObject = peer.stream;
+                    aud.srcObject = peer.audioStream;
                     aud.muted = this.isDeafened;
+                    aud.play().catch(() => {});
                 }
             }
         });
@@ -543,6 +662,8 @@ const WebRTCManager = {
             pc.close();
             this.peerConnections.delete(socketId);
         }
+        this.pendingCandidates.delete(socketId);
+        this.makingOffer.delete(socketId);
         this.peersData.delete(socketId);
         this.renderAllTiles();
     },
@@ -590,6 +711,8 @@ const WebRTCManager = {
 
         this.peerConnections.forEach(pc => pc.close());
         this.peerConnections.clear();
+        this.pendingCandidates.clear();
+        this.makingOffer.clear();
         this.peersData.clear();
 
         // Volta para a visualização padrão
