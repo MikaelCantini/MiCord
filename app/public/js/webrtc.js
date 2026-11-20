@@ -203,6 +203,10 @@ const WebRTCManager = {
                     if (state.hasScreen === false) hidden.screen = false;
                     if (state.hasVideo === false) hidden.video = false;
                 }
+                if (state.hasScreen === false) {
+                    peer.screenStreamId = null;
+                }
+                this.syncPeerAudioStreams(peer);
                 this.renderAllTiles();
             }
         });
@@ -258,7 +262,8 @@ const WebRTCManager = {
             });
 
             this.setupVoiceActivityDetection(this.localAudioStream);
-            this.attachTracksToAllPeers(this.localAudioStream);
+            this.socket?.emit('voice:state-update', { micStreamId: this.localAudioStream.id });
+            await this.attachTracksToAllPeers(this.localAudioStream);
         } catch (err) {
             console.warn('[WebRTC] Não foi possível acessar o microfone:', err);
             if (window.App) window.App.showToast('Aviso: microfone não encontrado ou permissão negada.');
@@ -302,58 +307,41 @@ const WebRTCManager = {
             const peerData = this.peersData.get(targetSocketId);
             if (!peerData) return;
 
-            if (!peerData.voiceAudioStream) peerData.voiceAudioStream = new MediaStream();
-            if (!peerData.screenAudioStream) peerData.screenAudioStream = new MediaStream();
+            if (!peerData.remoteAudioTracks) peerData.remoteAudioTracks = new Map();
             if (!peerData.videoTracks) peerData.videoTracks = [];
 
             if (track.kind === 'audio') {
-                track._streamId = incomingStreamId;
-
-                // Limpa tracks encerrados ou mudos antigos
-                peerData.voiceAudioStream.getAudioTracks().forEach(t => {
-                    if (t.readyState !== 'live') peerData.voiceAudioStream.removeTrack(t);
-                });
-                peerData.screenAudioStream.getAudioTracks().forEach(t => {
-                    if (t.readyState !== 'live') peerData.screenAudioStream.removeTrack(t);
+                const isFromVideoStream = Boolean(incomingStream && incomingStream.getVideoTracks().length > 0);
+                peerData.remoteAudioTracks.set(track.id, {
+                    track,
+                    streamId: incomingStreamId,
+                    isFromVideoStream
                 });
 
-                const hasVideoInStream = incomingStream ? incomingStream.getVideoTracks().length > 0 : false;
-                const matchesScreenStream = Boolean(
-                    hasVideoInStream ||
-                    (peerData.screenStreamId && incomingStreamId && peerData.screenStreamId === incomingStreamId)
-                );
-                const hasLiveVoiceTrack = peerData.voiceAudioStream.getAudioTracks().some(t => t.readyState === 'live' && !t.muted);
+                track.onended = () => {
+                    peerData.remoteAudioTracks.delete(track.id);
+                    this.syncPeerAudioStreams(peerData);
+                    this.renderAllTiles();
+                };
+                track.onmute = () => {
+                    this.syncPeerAudioStreams(peerData);
+                };
+                track.onunmute = () => {
+                    this.syncPeerAudioStreams(peerData);
+                    this.renderAllTiles();
+                };
 
-                const isAlreadyVoice = peerData.voiceAudioStream.getAudioTracks().some(t => t.id === track.id);
-                const isAlreadyScreen = peerData.screenAudioStream.getAudioTracks().some(t => t.id === track.id);
-
-                if (!isAlreadyVoice && !isAlreadyScreen) {
-                    if (matchesScreenStream || hasLiveVoiceTrack) {
-                        peerData.screenAudioStream.addTrack(track);
-                        track.onended = () => {
-                            peerData.screenAudioStream.removeTrack(track);
-                            this.renderAllTiles();
-                        };
-                    } else {
-                        peerData.voiceAudioStream.addTrack(track);
-                        track.onended = () => {
-                            peerData.voiceAudioStream.removeTrack(track);
-                            this.renderAllTiles();
-                        };
-                    }
-                }
+                this.syncPeerAudioStreams(peerData);
             } else if (track.kind === 'video') {
-                // Se o stream de vídeo também tem áudio (ou é a transmissão de tela), garante que o áudio vá para screenAudioStream
+                // Se o stream de vídeo tem áudio (ou é a transmissão de tela), marca qualquer track de áudio desse stream como áudio da transmissão
                 if (incomingStreamId && (peerData.hasScreen || (incomingStream && incomingStream.getAudioTracks().length > 0))) {
                     peerData.screenStreamId = incomingStreamId;
-                    peerData.voiceAudioStream.getAudioTracks().forEach(t => {
-                        if (t._streamId === incomingStreamId) {
-                            peerData.voiceAudioStream.removeTrack(t);
-                            if (!peerData.screenAudioStream.getAudioTracks().some(st => st.id === t.id)) {
-                                peerData.screenAudioStream.addTrack(t);
-                            }
+                    peerData.remoteAudioTracks.forEach(entry => {
+                        if (entry.streamId === incomingStreamId) {
+                            entry.isFromVideoStream = true;
                         }
                     });
+                    this.syncPeerAudioStreams(peerData);
                 }
 
                 // Remove tracks encerrados e adiciona o novo track de vídeo/tela
@@ -391,7 +379,55 @@ const WebRTCManager = {
             await this.renegotiatePeer(targetSocketId);
         }
 
+        // Compartilha IDs atuais dos nossos streams de áudio/tela para classificação correta nos peers
+        if (this.localAudioStream || this.localScreenStream) {
+            this.socket?.emit('voice:state-update', {
+                micStreamId: this.localAudioStream ? this.localAudioStream.id : null,
+                screenStreamId: this.isScreenSharing && this.localScreenStream ? this.localScreenStream.id : null,
+                hasScreen: this.isScreenSharing,
+                hasVideo: this.isVideoOn
+            });
+        }
+
         return pc;
+    },
+
+    // Classifica com precisão os tracks de áudio recebidos entre Voz do Usuário e Áudio da Transmissão
+    syncPeerAudioStreams(peerData) {
+        if (!peerData || !peerData.remoteAudioTracks) return;
+
+        const voiceTracks = [];
+        const screenTracks = [];
+
+        // Remove tracks que já encerraram
+        for (const [trackId, entry] of peerData.remoteAudioTracks.entries()) {
+            if (!entry.track || entry.track.readyState !== 'live') {
+                peerData.remoteAudioTracks.delete(trackId);
+            }
+        }
+
+        const entries = Array.from(peerData.remoteAudioTracks.values());
+        entries.forEach((entry, index) => {
+            const matchesScreenId = Boolean(peerData.screenStreamId && entry.streamId && entry.streamId === peerData.screenStreamId);
+            const matchesMicId = Boolean(peerData.micStreamId && entry.streamId && entry.streamId === peerData.micStreamId);
+            const differsFromMicId = Boolean(peerData.micStreamId && entry.streamId && entry.streamId !== peerData.micStreamId);
+
+            const isScreenAudio = !matchesMicId && (
+                matchesScreenId ||
+                entry.isFromVideoStream ||
+                differsFromMicId ||
+                (index > 0 && voiceTracks.length > 0)
+            );
+
+            if (isScreenAudio) {
+                screenTracks.push(entry.track);
+            } else {
+                voiceTracks.push(entry.track);
+            }
+        });
+
+        peerData.voiceAudioStream = voiceTracks.length > 0 ? new MediaStream(voiceTracks) : null;
+        peerData.screenAudioStream = screenTracks.length > 0 ? new MediaStream(screenTracks) : null;
     },
 
     async flushPendingCandidates(socketId, pc) {
@@ -556,8 +592,15 @@ const WebRTCManager = {
                     }
                 };
 
-                await this.attachTracksToAllPeers(this.localScreenStream);
                 this.isScreenSharing = true;
+                // Avisa os peers o screenStreamId ANTES de renegociar os tracks para separar o áudio da transmissão corretamente
+                this.socket.emit('voice:state-update', {
+                    hasScreen: true,
+                    screenStreamId: this.localScreenStream.id,
+                    micStreamId: this.localAudioStream ? this.localAudioStream.id : null
+                });
+
+                await this.attachTracksToAllPeers(this.localScreenStream);
             } catch (err) {
                 console.warn('[WebRTC] Compartilhamento de tela cancelado pelo usuário.');
                 return;
