@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  voice-chat:
+    build:
+      context: ./app
+    restart: always
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+
+  admin-panel:
+    build:
+      context: ./gestao
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
