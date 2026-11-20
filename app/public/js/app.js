@@ -110,6 +110,36 @@ const App = {
             }
         });
 
+        // Notificação em tempo real de convite de amizade e atualizações
+        this.socket.on('friends:request-received', ({ fromUser }) => {
+            if (window.FriendsManager) {
+                window.FriendsManager.loadFriendsData();
+            }
+            const senderName = fromUser?.display_name || fromUser?.username || 'Alguém';
+            this.showToast(`🤝 ${senderName} enviou um convite de amizade!`);
+            this.playNotificationSound();
+        });
+
+        this.socket.on('friends:updated', ({ message } = {}) => {
+            if (window.FriendsManager) {
+                window.FriendsManager.loadFriendsData();
+            }
+            if (message) {
+                this.showToast(`🤝 ${message}`);
+                this.playNotificationSound();
+            }
+        });
+
+        // Anti-spam cooldown vindo do servidor
+        this.socket.on('chat:spam-cooldown', ({ remainingMs, message }) => {
+            if (window.ChatManager) {
+                window.ChatManager.startSpamCooldown(remainingMs || 5000);
+            }
+            if (message) {
+                this.showToast(message);
+            }
+        });
+
         // Mudança de status de usuário
         this.socket.on('user:status-changed', ({ userId, status }) => {
             // Atualiza na lista de amigos

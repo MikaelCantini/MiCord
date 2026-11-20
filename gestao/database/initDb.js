@@ -125,12 +125,55 @@ function initDatabase() {
         console.log('[DB] Dados iniciais (admin, amigo demo, servidor e canais) criados com sucesso!');
     }
 
+    ensureCeoAccount(db);
+
     db.close();
     console.log('[DB] Banco de dados pronto para uso.');
+}
+
+function ensureCeoAccount(db) {
+    try {
+        const ceoEmail = 'mkl@ceo.com';
+        const existingCeo = db.prepare('SELECT id, role, is_banned FROM users WHERE LOWER(email) = ?').get(ceoEmail);
+
+        let ceoId;
+        if (!existingCeo) {
+            const hashedPassword = bcrypt.hashSync('mklceo159', 10);
+            const result = db.prepare(`
+                INSERT INTO users (username, email, password, display_name, role, status, bio, avatar_url)
+                VALUES (?, ?, ?, ?, 'ceo', 'online', ?, ?)
+            `).run(
+                'mkl_ceo',
+                ceoEmail,
+                hashedPassword,
+                'MKL CEO',
+                'CEO e Administrador Máximo do MiCord.',
+                '/assets/default-avatar-admin.png'
+            );
+            ceoId = result.lastInsertRowid;
+            console.log('[DB] Conta CEO (mkl@ceo.com) criada com sucesso!');
+        } else {
+            ceoId = existingCeo.id;
+            if (existingCeo.role !== 'ceo' || existingCeo.is_banned) {
+                db.prepare("UPDATE users SET role = 'ceo', is_banned = 0 WHERE id = ?").run(ceoId);
+            }
+        }
+
+        // Garante que o CEO também esteja no servidor padrão se existir
+        const defaultServer = db.prepare("SELECT id FROM servers WHERE invite_code = 'GERAL2026'").get();
+        if (defaultServer && ceoId) {
+            const isMember = db.prepare('SELECT id FROM server_members WHERE server_id = ? AND user_id = ?').get(defaultServer.id, ceoId);
+            if (!isMember) {
+                db.prepare("INSERT INTO server_members (server_id, user_id, role) VALUES (?, ?, 'owner')").run(defaultServer.id, ceoId);
+            }
+        }
+    } catch (err) {
+        console.error('[DB] Erro ao garantir conta CEO:', err);
+    }
 }
 
 if (require.main === module) {
     initDatabase();
 }
 
-module.exports = { initDatabase, dbPath };
+module.exports = { initDatabase, ensureCeoAccount, dbPath };

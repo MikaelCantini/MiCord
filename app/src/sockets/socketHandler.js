@@ -9,6 +9,8 @@ const userSockets = new Map();
 const socketUsers = new Map();
 // Map<channelId, Set<{ socketId, user, isMuted, isDeafened, hasVideo, hasScreen, isSpeaking }>>
 const voiceRooms = new Map();
+// Controle de anti-spam por usuário: Map<userId, { timestamps: number[], cooldownUntil: number }>
+const userSpamTracker = new Map();
 
 function setupSocketIO(io) {
     // Middleware de autenticação Socket.io
@@ -93,6 +95,34 @@ function setupSocketIO(io) {
                 
                 if ((!content || !content.trim()) && !attachmentUrl) return;
 
+                // Sistema Anti-Spam: 5 mensagens seguidas -> cooldown de 5 segundos
+                const now = Date.now();
+                let tracker = userSpamTracker.get(userId);
+                if (!tracker) {
+                    tracker = { timestamps: [], cooldownUntil: 0 };
+                    userSpamTracker.set(userId, tracker);
+                }
+
+                if (now < tracker.cooldownUntil) {
+                    const remainingMs = tracker.cooldownUntil - now;
+                    socket.emit('chat:spam-cooldown', {
+                        remainingMs,
+                        message: `⏳ Anti-spam: aguarde ${Math.ceil(remainingMs / 1000)}s para enviar mais mensagens.`
+                    });
+                    return;
+                }
+
+                // Considera mensagens enviadas em sequência nos últimos 10 segundos
+                tracker.timestamps = tracker.timestamps.filter(ts => now - ts < 10000);
+                tracker.timestamps.push(now);
+
+                let triggeredCooldown = false;
+                if (tracker.timestamps.length >= 5) {
+                    tracker.cooldownUntil = now + 5000;
+                    tracker.timestamps = [];
+                    triggeredCooldown = true;
+                }
+
                 const result = db.run(`
                     INSERT INTO messages (channel_id, recipient_id, sender_id, content, attachment_url, attachment_type, attachment_name)
                     VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -121,6 +151,13 @@ function setupSocketIO(io) {
                     // Notifica ambos os usuários da DM
                     io.to(`user-${recipientId}`).emit('chat:new-message', fullMsg);
                     io.to(`user-${userId}`).emit('chat:new-message', fullMsg);
+                }
+
+                if (triggeredCooldown) {
+                    socket.emit('chat:spam-cooldown', {
+                        remainingMs: 5000,
+                        message: '⏳ Anti-spam: você enviou 5 mensagens seguidas. Aguarde 5 segundos.'
+                    });
                 }
             } catch (err) {
                 console.error('Erro ao enviar mensagem via socket:', err);
@@ -212,6 +249,17 @@ function setupSocketIO(io) {
                 socketId: socket.id,
                 userId: user.id,
                 state
+            });
+        });
+
+        // Moderação: CEO / Admin / Moderador pode encerrar transmissão ou câmera de um participante
+        socket.on('voice:force-stop-media', ({ targetSocketId, mediaType }) => {
+            if (!['ceo', 'admin', 'moderator'].includes(user.role)) return;
+            if (!targetSocketId || !['screen', 'video'].includes(mediaType)) return;
+
+            io.to(targetSocketId).emit('voice:force-stopped-media', {
+                mediaType,
+                byUser: user.display_name || user.username
             });
         });
 

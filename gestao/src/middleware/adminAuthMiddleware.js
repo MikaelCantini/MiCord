@@ -31,8 +31,8 @@ function adminAuthMiddleware(req, res, next) {
             return res.status(403).json({ error: 'Esta conta de administrador foi bloqueada.' });
         }
 
-        if (user.role !== 'admin') {
-            return res.status(403).json({ error: 'Permissão negada. Apenas administradores têm acesso ao Painel de Gestão.' });
+        if (!['ceo', 'admin'].includes(user.role)) {
+            return res.status(403).json({ error: 'Permissão negada. Apenas CEO e administradores têm acesso ao Painel de Gestão.' });
         }
 
         req.admin = user;

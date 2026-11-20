@@ -164,6 +164,10 @@ const AdminApp = {
 
         if (this.admin) {
             document.getElementById('admin-name').textContent = this.admin.display_name || this.admin.username;
+            const roleBadge = document.getElementById('admin-role-badge');
+            if (roleBadge) {
+                roleBadge.textContent = this.admin.role === 'ceo' ? '👑 CEO (Autoridade Máxima)' : 'Administrador';
+            }
         }
 
         this.switchTab('overview');

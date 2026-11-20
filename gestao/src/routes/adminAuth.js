@@ -26,8 +26,8 @@ router.post('/login', (req, res) => {
             return res.status(401).json({ error: 'Credenciais inválidas.' });
         }
 
-        if (user.role !== 'admin') {
-            return res.status(403).json({ error: 'Acesso restrito. Esta conta não possui privilégios de Administrador.' });
+        if (!['ceo', 'admin'].includes(user.role)) {
+            return res.status(403).json({ error: 'Acesso restrito. Esta conta não possui privilégios de CEO ou Administrador.' });
         }
 
         if (user.is_banned) {
@@ -39,7 +39,7 @@ router.post('/login', (req, res) => {
             return res.status(401).json({ error: 'Credenciais inválidas.' });
         }
 
-        const token = jwt.sign({ userId: user.id, role: 'admin' }, config.JWT_SECRET, { expiresIn: '7d' });
+        const token = jwt.sign({ userId: user.id, role: user.role }, config.JWT_SECRET, { expiresIn: '7d' });
 
         // Registrar auditoria
         try {

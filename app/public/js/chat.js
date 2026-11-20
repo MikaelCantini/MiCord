@@ -7,6 +7,9 @@ const ChatManager = {
     currentDMUserId: null,
     pendingAttachment: null,
     typingTimeout: null,
+    spamCooldownUntil: 0,
+    spamCooldownInterval: null,
+    originalPlaceholder: '',
 
     init() {
         this.bindEvents();
@@ -188,6 +191,12 @@ const ChatManager = {
     },
 
     async sendMessage() {
+        if (Date.now() < this.spamCooldownUntil) {
+            const secs = Math.ceil((this.spamCooldownUntil - Date.now()) / 1000);
+            if (window.App) window.App.showToast(`⏳ Anti-spam: aguarde ${secs}s para enviar mais mensagens.`);
+            return;
+        }
+
         const input = document.getElementById('message-input');
         const content = input.value.trim();
 
@@ -309,6 +318,41 @@ const ChatManager = {
         img.src = imageUrl;
         if (downloadBtn) downloadBtn.href = imageUrl;
         modal.style.display = 'flex';
+    },
+
+    startSpamCooldown(durationMs = 5000) {
+        const input = document.getElementById('message-input');
+        const sendBtn = document.getElementById('btn-send-message');
+        if (!input) return;
+
+        if (!this.spamCooldownInterval) {
+            this.originalPlaceholder = input.placeholder;
+        } else {
+            clearInterval(this.spamCooldownInterval);
+        }
+
+        this.spamCooldownUntil = Date.now() + durationMs;
+
+        const updateUI = () => {
+            const remaining = this.spamCooldownUntil - Date.now();
+            if (remaining <= 0) {
+                clearInterval(this.spamCooldownInterval);
+                this.spamCooldownInterval = null;
+                this.spamCooldownUntil = 0;
+                input.disabled = false;
+                if (sendBtn) sendBtn.disabled = false;
+                input.placeholder = this.originalPlaceholder || 'Digite uma mensagem...';
+                return;
+            }
+
+            const secs = Math.ceil(remaining / 1000);
+            input.disabled = true;
+            if (sendBtn) sendBtn.disabled = true;
+            input.placeholder = `⏳ Anti-spam: aguarde ${secs}s para enviar mais mensagens...`;
+        };
+
+        updateUI();
+        this.spamCooldownInterval = setInterval(updateUI, 250);
     },
 
     scrollToBottom() {

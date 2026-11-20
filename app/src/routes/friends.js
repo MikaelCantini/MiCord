@@ -115,6 +115,13 @@ router.post('/request', authMiddleware, (req, res) => {
                 } else {
                     // O outro já me enviou pedido! Auto-aceita!
                     db.run("UPDATE friends SET status = 'accepted', updated_at = CURRENT_TIMESTAMP WHERE id = ?", [existing.id]);
+                    const io = req.app.get('io');
+                    if (io) {
+                        io.to(`user-${targetUser.id}`).emit('friends:updated', {
+                            message: `${req.user.display_name || req.user.username} aceitou seu convite de amizade!`
+                        });
+                        io.to(`user-${myId}`).emit('friends:updated', {});
+                    }
                     return res.json({ 
                         message: `Você aceitou a solicitação pendente de ${targetUser.display_name || targetUser.username}!`,
                         status: 'accepted'
@@ -131,6 +138,18 @@ router.post('/request', authMiddleware, (req, res) => {
             INSERT INTO friends (user_id, friend_id, status)
             VALUES (?, ?, 'pending')
         `, [myId, targetUser.id]);
+
+        const io = req.app.get('io');
+        if (io) {
+            io.to(`user-${targetUser.id}`).emit('friends:request-received', {
+                fromUser: {
+                    id: myId,
+                    username: req.user.username,
+                    display_name: req.user.display_name || req.user.username
+                }
+            });
+            io.to(`user-${myId}`).emit('friends:updated', {});
+        }
 
         return res.status(201).json({
             message: `Solicitação de amizade enviada com sucesso para ${targetUser.display_name || targetUser.username}!`,
@@ -169,12 +188,24 @@ router.post('/respond', authMiddleware, (req, res) => {
 
         if (action === 'accept') {
             db.run("UPDATE friends SET status = 'accepted', updated_at = CURRENT_TIMESTAMP WHERE id = ?", [requestId]);
+            const io = req.app.get('io');
+            if (io) {
+                io.to(`user-${request.user_id}`).emit('friends:updated', {
+                    message: `${req.user.display_name || req.user.username} aceitou seu convite de amizade!`
+                });
+                io.to(`user-${myId}`).emit('friends:updated', {});
+            }
             return res.json({ 
                 message: `Amizade com ${request.display_name || request.username} aceita com sucesso!`,
                 action: 'accepted'
             });
         } else if (action === 'decline') {
             db.run('DELETE FROM friends WHERE id = ?', [requestId]);
+            const io = req.app.get('io');
+            if (io) {
+                io.to(`user-${request.user_id}`).emit('friends:updated', {});
+                io.to(`user-${myId}`).emit('friends:updated', {});
+            }
             return res.json({ message: 'Solicitação recusada.', action: 'declined' });
         } else {
             return res.status(400).json({ error: 'Ação inválida. Use accept ou decline.' });
@@ -198,6 +229,12 @@ router.delete('/:id', authMiddleware, (req, res) => {
 
         if (result.changes === 0) {
             return res.status(404).json({ error: 'Amizade não encontrada.' });
+        }
+
+        const io = req.app.get('io');
+        if (io) {
+            io.to(`user-${friendId}`).emit('friends:updated', {});
+            io.to(`user-${myId}`).emit('friends:updated', {});
         }
 
         return res.json({ message: 'Amizade desfeita com sucesso.' });

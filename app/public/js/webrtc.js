@@ -26,6 +26,12 @@ const WebRTCManager = {
     pendingCandidates: new Map(),
     // Controle de negociação simultânea (glare)
     makingOffer: new Map(),
+    // Volumes individuais por participante: Map<socketId, { voice: number, screen: number }>
+    peerVolumes: new Map(),
+    // Mídias ocultadas localmente por participante: Map<socketId, { screen: boolean, video: boolean }>
+    hiddenMedia: new Map(),
+    // Popover de volume aberto atualmente (socketId ou null)
+    openVolumePopoverId: null,
 
     // Detecção de voz (AudioContext)
     audioContext: null,
@@ -189,7 +195,24 @@ const WebRTCManager = {
             const peer = this.peersData.get(socketId);
             if (peer) {
                 Object.assign(peer, state);
+                // Se o peer parou de compartilhar tela/câmera, reseta o estado de ocultação local
+                const hidden = this.hiddenMedia.get(socketId);
+                if (hidden) {
+                    if (state.hasScreen === false) hidden.screen = false;
+                    if (state.hasVideo === false) hidden.video = false;
+                }
                 this.renderAllTiles();
+            }
+        });
+
+        // Moderação: CEO / Admin / Moderador encerrou nossa transmissão ou câmera
+        this.socket.on('voice:force-stopped-media', async ({ mediaType, byUser }) => {
+            if (mediaType === 'screen' && this.isScreenSharing) {
+                await this.toggleScreenShare();
+                if (window.App) window.App.showToast(`🛑 ${byUser} encerrou sua transmissão de tela.`);
+            } else if (mediaType === 'video' && this.isVideoOn) {
+                await this.toggleVideo();
+                if (window.App) window.App.showToast(`🛑 ${byUser} desligou sua câmera.`);
             }
         });
 
@@ -269,23 +292,36 @@ const WebRTCManager = {
             }
         };
 
-        // Recebimento de Stream remoto (Áudio, Vídeo ou Tela)
+        // Recebimento de Stream remoto (Áudio da voz, Áudio da transmissão, Vídeo ou Tela)
         pc.ontrack = (event) => {
             const track = event.track;
             const peerData = this.peersData.get(targetSocketId);
             if (!peerData) return;
 
-            if (!peerData.audioStream) peerData.audioStream = new MediaStream();
+            if (!peerData.voiceAudioStream) peerData.voiceAudioStream = new MediaStream();
+            if (!peerData.screenAudioStream) peerData.screenAudioStream = new MediaStream();
             if (!peerData.videoTracks) peerData.videoTracks = [];
 
             if (track.kind === 'audio') {
-                const exists = peerData.audioStream.getAudioTracks().some(t => t.id === track.id);
-                if (!exists) {
-                    peerData.audioStream.addTrack(track);
+                const liveVoiceTracks = peerData.voiceAudioStream.getAudioTracks().filter(t => t.readyState === 'live');
+                const isAlreadyVoice = peerData.voiceAudioStream.getAudioTracks().some(t => t.id === track.id);
+                const isAlreadyScreen = peerData.screenAudioStream.getAudioTracks().some(t => t.id === track.id);
+
+                if (!isAlreadyVoice && !isAlreadyScreen) {
+                    if (liveVoiceTracks.length === 0) {
+                        peerData.voiceAudioStream.addTrack(track);
+                        track.onended = () => {
+                            peerData.voiceAudioStream.removeTrack(track);
+                            this.renderAllTiles();
+                        };
+                    } else {
+                        peerData.screenAudioStream.addTrack(track);
+                        track.onended = () => {
+                            peerData.screenAudioStream.removeTrack(track);
+                            this.renderAllTiles();
+                        };
+                    }
                 }
-                track.onended = () => {
-                    peerData.audioStream.removeTrack(track);
-                };
             } else if (track.kind === 'video') {
                 // Remove tracks encerrados e adiciona o novo track de vídeo/tela
                 peerData.videoTracks = peerData.videoTracks.filter(t => t.readyState === 'live' && t.id !== track.id);
@@ -545,7 +581,21 @@ const WebRTCManager = {
         if (!grid) return;
         grid.innerHTML = '';
 
-        const currentUser = window.AuthManager ? window.AuthManager.user : { username: 'Você', display_name: 'Você' };
+        const currentUser = window.AuthManager ? window.AuthManager.user : { username: 'Você', display_name: 'Você', role: 'user' };
+        const canModerate = ['ceo', 'admin', 'moderator'].includes(currentUser.role);
+
+        // Conta quantas telas estão visíveis ao mesmo tempo para evitar sobreposição
+        let activeScreensCount = (this.isScreenSharing && this.localScreenStream) ? 1 : 0;
+        this.peersData.forEach((peer, socketId) => {
+            const hidden = this.hiddenMedia.get(socketId) || { screen: false, video: false };
+            const activeVideoTracks = peer.videoStream
+                ? peer.videoStream.getVideoTracks().filter(t => t.readyState === 'live' && !t.muted)
+                : [];
+            if (activeVideoTracks.length > 0 && peer.hasScreen && !hidden.screen) {
+                activeScreensCount++;
+            }
+        });
+        grid.classList.toggle('multi-screen', activeScreensCount >= 2);
 
         // 1. Nosso próprio tile
         const selfTile = document.createElement('div');
@@ -595,29 +645,78 @@ const WebRTCManager = {
             peerTile.id = `peer-tile-${socketId}`;
             peerTile.className = `participant-tile ${peer.isSpeaking ? 'speaking' : ''}`;
 
+            const vols = this.peerVolumes.get(socketId) || { voice: 1, screen: 1 };
+            const hidden = this.hiddenMedia.get(socketId) || { screen: false, video: false };
+
             const activeVideoTracks = peer.videoStream
                 ? peer.videoStream.getVideoTracks().filter(t => t.readyState === 'live' && !t.muted)
                 : [];
             const hasLiveVideo = activeVideoTracks.length > 0;
+            const isScreen = Boolean(peer.hasScreen);
+            const isHiddenLocally = isScreen ? hidden.screen : hidden.video;
+            const showVideo = hasLiveVideo && !isHiddenLocally;
+
+            const hasScreenAudio = peer.screenAudioStream && peer.screenAudioStream.getAudioTracks().some(t => t.readyState === 'live');
 
             let peerMediaHtml = '';
-            if (hasLiveVideo) {
-                if (peer.hasScreen) peerTile.classList.add('featured-screen');
-                peerMediaHtml = `<video class="participant-video ${peer.hasScreen ? 'screen-share' : ''}" id="video-${socketId}" autoplay muted playsinline></video>`;
+            if (showVideo) {
+                if (isScreen) peerTile.classList.add('featured-screen');
+                peerMediaHtml = `<video class="participant-video ${isScreen ? 'screen-share' : ''}" id="video-${socketId}" autoplay muted playsinline></video>`;
             } else {
                 peerMediaHtml = `
                     <div class="participant-avatar-view">
                         <img src="${pUser.avatar_url || '/assets/default-avatar.png'}" alt="${pUser.display_name}">
+                        ${hasLiveVideo && isHiddenLocally ? `<small style="color: var(--text-muted); font-weight: 600;">${isScreen ? 'Transmissão oculta' : 'Câmera oculta'}</small>` : ''}
                     </div>
                 `;
             }
 
-            // Áudio remoto
-            const audioHtml = `<audio class="remote-peer-audio" id="audio-${socketId}" autoplay playsinline></audio>`;
+            // Botões de ação no topo direito do tile (Volume, Fechar Tela / Câmera, e Moderação)
+            let topButtonsHtml = '';
+            if (hasLiveVideo) {
+                if (isScreen) {
+                    topButtonsHtml += `<button type="button" class="tile-action-btn" onclick="WebRTCManager.toggleHidePeerMedia('${socketId}', 'screen')" title="${hidden.screen ? 'Abrir transmissão' : 'Fechar transmissão para mim'}">${hidden.screen ? '🖥️ Ver Tela' : '✕ Fechar Tela'}</button>`;
+                    if (canModerate) {
+                        topButtonsHtml += `<button type="button" class="tile-action-btn danger-action" onclick="WebRTCManager.forceStopPeerMedia('${socketId}', 'screen')" title="Encerrar transmissão para todos">🛑 Encerrar</button>`;
+                    }
+                } else {
+                    topButtonsHtml += `<button type="button" class="tile-action-btn" onclick="WebRTCManager.toggleHidePeerMedia('${socketId}', 'video')" title="${hidden.video ? 'Mostrar câmera' : 'Fechar câmera para mim'}">${hidden.video ? '📹 Ver Câmera' : '✕ Fechar Câmera'}</button>`;
+                    if (canModerate) {
+                        topButtonsHtml += `<button type="button" class="tile-action-btn danger-action" onclick="WebRTCManager.forceStopPeerMedia('${socketId}', 'video')" title="Desligar câmera para todos">🛑 Desligar</button>`;
+                    }
+                }
+            }
+            topButtonsHtml += `<button type="button" class="tile-action-btn" onclick="WebRTCManager.toggleVolumePopover('${socketId}')" title="Ajustar volume do usuário e da transmissão">🔊</button>`;
+
+            const voicePct = Math.round(vols.voice * 100);
+            const screenPct = Math.round(vols.screen * 100);
+            const isPopoverOpen = this.openVolumePopoverId === socketId;
+
+            const volumePopoverHtml = `
+                <div class="tile-volume-popover ${isPopoverOpen ? 'open' : ''}" id="vol-popover-${socketId}">
+                    <div class="volume-control-row">
+                        <label><span>🎙️ Voz do Usuário</span><span id="vol-voice-label-${socketId}">${voicePct}%</span></label>
+                        <input type="range" min="0" max="100" value="${voicePct}" class="volume-slider" oninput="WebRTCManager.setPeerVolume('${socketId}', 'voice', this.value)">
+                    </div>
+                    ${(isScreen || hasScreenAudio) ? `
+                    <div class="volume-control-row">
+                        <label><span>🖥️ Transmissão</span><span id="vol-screen-label-${socketId}">${screenPct}%</span></label>
+                        <input type="range" min="0" max="100" value="${screenPct}" class="volume-slider" oninput="WebRTCManager.setPeerVolume('${socketId}', 'screen', this.value)">
+                    </div>` : ''}
+                </div>
+            `;
+
+            // Áudio remoto separado (Voz e Áudio da Transmissão)
+            const audioHtml = `
+                <audio class="remote-peer-audio" id="audio-voice-${socketId}" autoplay playsinline></audio>
+                <audio class="remote-peer-audio" id="audio-screen-${socketId}" autoplay playsinline></audio>
+            `;
 
             peerTile.innerHTML = `
                 ${peerMediaHtml}
                 ${audioHtml}
+                <div class="tile-top-actions">${topButtonsHtml}</div>
+                ${volumePopoverHtml}
                 <div class="participant-overlay">
                     <span class="participant-tag">${pUser.display_name || pUser.username} ${peer.hasScreen ? '(Tela)' : ''}</span>
                     <div class="participant-icons">
@@ -629,8 +728,8 @@ const WebRTCManager = {
             `;
             grid.appendChild(peerTile);
 
-            // Vincula streams remotos (vídeo e áudio separados)
-            if (hasLiveVideo && peer.videoStream) {
+            // Vincula streams remotos (vídeo, áudio da voz e áudio da transmissão)
+            if (showVideo && peer.videoStream) {
                 const vid = document.getElementById(`video-${socketId}`);
                 if (vid) {
                     vid.srcObject = peer.videoStream;
@@ -638,12 +737,23 @@ const WebRTCManager = {
                 }
             }
 
-            if (peer.audioStream) {
-                const aud = document.getElementById(`audio-${socketId}`);
-                if (aud) {
-                    aud.srcObject = peer.audioStream;
-                    aud.muted = this.isDeafened;
-                    aud.play().catch(() => {});
+            if (peer.voiceAudioStream) {
+                const audVoice = document.getElementById(`audio-voice-${socketId}`);
+                if (audVoice) {
+                    audVoice.srcObject = peer.voiceAudioStream;
+                    audVoice.volume = vols.voice;
+                    audVoice.muted = this.isDeafened;
+                    audVoice.play().catch(() => {});
+                }
+            }
+
+            if (peer.screenAudioStream) {
+                const audScreen = document.getElementById(`audio-screen-${socketId}`);
+                if (audScreen) {
+                    audScreen.srcObject = peer.screenAudioStream;
+                    audScreen.volume = vols.screen;
+                    audScreen.muted = this.isDeafened || hidden.screen;
+                    audScreen.play().catch(() => {});
                 }
             }
         });
@@ -656,6 +766,41 @@ const WebRTCManager = {
         }
     },
 
+    toggleVolumePopover(socketId) {
+        this.openVolumePopoverId = this.openVolumePopoverId === socketId ? null : socketId;
+        document.querySelectorAll('.tile-volume-popover').forEach(el => {
+            el.classList.toggle('open', el.id === `vol-popover-${this.openVolumePopoverId}`);
+        });
+    },
+
+    setPeerVolume(socketId, kind, percentValue) {
+        const vol = Math.max(0, Math.min(1, parseInt(percentValue, 10) / 100));
+        const current = this.peerVolumes.get(socketId) || { voice: 1, screen: 1 };
+        current[kind] = vol;
+        this.peerVolumes.set(socketId, current);
+
+        const labelEl = document.getElementById(`vol-${kind}-label-${socketId}`);
+        if (labelEl) labelEl.textContent = `${Math.round(vol * 100)}%`;
+
+        const audioEl = document.getElementById(`audio-${kind}-${socketId}`);
+        if (audioEl) audioEl.volume = vol;
+    },
+
+    toggleHidePeerMedia(socketId, kind) {
+        const current = this.hiddenMedia.get(socketId) || { screen: false, video: false };
+        current[kind] = !current[kind];
+        this.hiddenMedia.set(socketId, current);
+        this.renderAllTiles();
+    },
+
+    forceStopPeerMedia(socketId, mediaType) {
+        if (!this.socket) return;
+        const label = mediaType === 'screen' ? 'transmissão de tela' : 'câmera';
+        if (!confirm(`Deseja encerrar a ${label} deste participante para todos na sala?`)) return;
+        this.socket.emit('voice:force-stop-media', { targetSocketId: socketId, mediaType });
+        if (window.App) window.App.showToast(`Solicitação enviada para encerrar a ${label}.`);
+    },
+
     removePeer(socketId) {
         const pc = this.peerConnections.get(socketId);
         if (pc) {
@@ -664,6 +809,9 @@ const WebRTCManager = {
         }
         this.pendingCandidates.delete(socketId);
         this.makingOffer.delete(socketId);
+        this.peerVolumes.delete(socketId);
+        this.hiddenMedia.delete(socketId);
+        if (this.openVolumePopoverId === socketId) this.openVolumePopoverId = null;
         this.peersData.delete(socketId);
         this.renderAllTiles();
     },
@@ -713,6 +861,9 @@ const WebRTCManager = {
         this.peerConnections.clear();
         this.pendingCandidates.clear();
         this.makingOffer.clear();
+        this.peerVolumes.clear();
+        this.hiddenMedia.clear();
+        this.openVolumePopoverId = null;
         this.peersData.clear();
 
         // Volta para a visualização padrão

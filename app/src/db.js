@@ -3,11 +3,12 @@ const fs = require('fs');
 const { DatabaseSync } = require('node:sqlite');
 const config = require('./config');
 
+const { initDatabase, ensureCeoAccount } = require('../../gestao/database/initDb');
+
 const dbPath = config.DB_PATH;
 
 if (!fs.existsSync(dbPath)) {
     console.log(`[App DB] Banco de dados em ${dbPath} não encontrado. Inicializando...`);
-    const { initDatabase } = require('../../gestao/database/initDb');
     initDatabase();
 }
 
@@ -17,6 +18,9 @@ const db = new DatabaseSync(dbPath);
 db.exec('PRAGMA journal_mode = WAL;');
 db.exec('PRAGMA busy_timeout = 5000;');
 db.exec('PRAGMA foreign_keys = ON;');
+
+// Garante que a conta CEO exista mesmo em bancos já criados
+ensureCeoAccount(db);
 
 module.exports = {
     db,

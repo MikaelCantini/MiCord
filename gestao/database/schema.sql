@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS users (
     bio TEXT,
     status TEXT DEFAULT 'online', -- 'online', 'idle', 'dnd', 'offline'
     custom_status TEXT,
-    role TEXT DEFAULT 'user',     -- 'admin', 'moderator', 'user'
+    role TEXT DEFAULT 'user',     -- 'ceo', 'admin', 'moderator', 'user'
     is_banned INTEGER DEFAULT 0,  -- 0 = ativo, 1 = banido
     ban_reason TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,

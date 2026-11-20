@@ -63,7 +63,8 @@ router.post('/', adminAuthMiddleware, (req, res) => {
 
         const trimmedUser = username.trim().toLowerCase();
         const trimmedEmail = email.trim().toLowerCase();
-        const validRole = ['admin', 'moderator', 'user'].includes(role) ? role : 'user';
+        const allowedRoles = req.admin.role === 'ceo' ? ['ceo', 'admin', 'moderator', 'user'] : ['admin', 'moderator', 'user'];
+        const validRole = allowedRoles.includes(role) ? role : 'user';
 
         const existing = db.queryOne('SELECT id FROM users WHERE username = ? OR email = ?', [trimmedUser, trimmedEmail]);
         if (existing) {
@@ -100,6 +101,10 @@ router.put('/:id', adminAuthMiddleware, (req, res) => {
             return res.status(404).json({ error: 'Usuário não encontrado.' });
         }
 
+        if (user.role === 'ceo' && req.admin.role !== 'ceo') {
+            return res.status(403).json({ error: 'Apenas o CEO tem autorização para editar a conta CEO.' });
+        }
+
         let passwordChanged = false;
         if (password && password.trim()) {
             if (password.trim().length < 4) {
@@ -110,7 +115,8 @@ router.put('/:id', adminAuthMiddleware, (req, res) => {
             passwordChanged = true;
         }
 
-        const validRole = ['admin', 'moderator', 'user'].includes(role) ? role : user.role;
+        const allowedRoles = req.admin.role === 'ceo' ? ['ceo', 'admin', 'moderator', 'user'] : ['admin', 'moderator', 'user'];
+        const validRole = allowedRoles.includes(role) ? role : user.role;
 
         db.run(`
             UPDATE users
@@ -152,9 +158,13 @@ router.put('/:id/password', adminAuthMiddleware, (req, res) => {
             return res.status(400).json({ error: 'A nova senha deve ter no mínimo 4 caracteres.' });
         }
 
-        const user = db.queryOne('SELECT id, username FROM users WHERE id = ?', [userId]);
+        const user = db.queryOne('SELECT id, username, role FROM users WHERE id = ?', [userId]);
         if (!user) {
             return res.status(404).json({ error: 'Usuário não encontrado.' });
+        }
+
+        if (user.role === 'ceo' && req.admin.role !== 'ceo') {
+            return res.status(403).json({ error: 'Apenas o CEO pode alterar a senha da conta CEO.' });
         }
 
         const hashedPassword = bcrypt.hashSync(password.trim(), 10);
@@ -182,9 +192,13 @@ router.post('/:id/toggle-ban', adminAuthMiddleware, (req, res) => {
             return res.status(400).json({ error: 'Você não pode banir a sua própria conta de administrador!' });
         }
 
-        const user = db.queryOne('SELECT id, username, is_banned FROM users WHERE id = ?', [userId]);
+        const user = db.queryOne('SELECT id, username, role, is_banned FROM users WHERE id = ?', [userId]);
         if (!user) {
             return res.status(404).json({ error: 'Usuário não encontrado.' });
+        }
+
+        if (user.role === 'ceo') {
+            return res.status(403).json({ error: 'A conta CEO não pode ser banida!' });
         }
 
         const newBanStatus = user.is_banned ? 0 : 1;
@@ -224,9 +238,13 @@ router.delete('/:id', adminAuthMiddleware, (req, res) => {
             return res.status(400).json({ error: 'Você não pode excluir sua própria conta de administrador!' });
         }
 
-        const user = db.queryOne('SELECT id, username FROM users WHERE id = ?', [userId]);
+        const user = db.queryOne('SELECT id, username, role FROM users WHERE id = ?', [userId]);
         if (!user) {
             return res.status(404).json({ error: 'Usuário não encontrado.' });
+        }
+
+        if (user.role === 'ceo') {
+            return res.status(403).json({ error: 'A conta CEO não pode ser excluída!' });
         }
 
         db.run('DELETE FROM users WHERE id = ?', [userId]);
