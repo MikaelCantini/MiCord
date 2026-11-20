@@ -5,7 +5,7 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci --production
 
-COPY . .
+COPY ./gestao ./gestao
 
 EXPOSE 3000
 CMD ["npm", "start"]
