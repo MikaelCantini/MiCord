@@ -47,18 +47,25 @@ const App = {
         });
     },
 
-    onAuthenticated(user, token) {
+    async onAuthenticated(user, token, options = {}) {
         console.log(`[App] Usuário autenticado: ${user.username}`);
         
         // Conecta ao Socket.io
         this.connectSocket(token);
 
         // Carrega dados iniciais
-        window.ServersManager.loadServers();
+        await window.ServersManager.loadServers();
         window.FriendsManager.loadFriendsData();
 
-        // Exibe Hub de Amigos inicial
-        this.showHomeView();
+        // Ao criar conta (ou se já quiser iniciar no Grupo Geral), abre o Grupo Geral automaticamente
+        const generalServer = window.ServersManager.servers.find(s => s.invite_code === 'GERAL2026')
+            || window.ServersManager.servers[0];
+
+        if (options.isNewAccount && generalServer) {
+            await window.ServersManager.selectServer(generalServer.id);
+        } else {
+            this.showHomeView();
+        }
     },
 
     connectSocket(token) {

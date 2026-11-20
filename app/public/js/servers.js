@@ -62,6 +62,10 @@ const ServersManager = {
             await this.joinServer(invite_code);
         });
 
+        document.getElementById('btn-join-general-group')?.addEventListener('click', async () => {
+            await this.joinServer('GERAL2026');
+        });
+
         // Botões de criar canais
         document.getElementById('btn-create-text-channel')?.addEventListener('click', () => {
             this.openCreateChannelModal('text');

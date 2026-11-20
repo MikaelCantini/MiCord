@@ -126,6 +126,7 @@ function initDatabase() {
     }
 
     ensureCeoAccount(db);
+    ensureDefaultGeneralGroup(db);
 
     db.close();
     console.log('[DB] Banco de dados pronto para uso.');
@@ -172,8 +173,63 @@ function ensureCeoAccount(db) {
     }
 }
 
+function ensureDefaultGeneralGroup(db) {
+    try {
+        let generalServer = db.prepare("SELECT id, name FROM servers WHERE invite_code = 'GERAL2026' LIMIT 1").get();
+
+        // Define o proprietário (prioriza CEO, senão primeiro admin, senão primeiro usuário)
+        const owner = db.prepare("SELECT id FROM users WHERE role = 'ceo' LIMIT 1").get()
+            || db.prepare("SELECT id FROM users WHERE role = 'admin' LIMIT 1").get()
+            || db.prepare("SELECT id FROM users ORDER BY id ASC LIMIT 1").get();
+
+        if (!owner) return;
+
+        if (!generalServer) {
+            const created = db.prepare(`
+                INSERT INTO servers (name, description, owner_id, invite_code)
+                VALUES (?, ?, ?, 'GERAL2026')
+            `).run(
+                'Grupo Geral',
+                'Grupo geral oficial do MiCord onde todo mundo pode entrar, conversar e entrar em call!',
+                owner.id
+            );
+            generalServer = { id: created.lastInsertRowid };
+
+            // Cria canais padrão de texto e voz
+            const insertChannel = db.prepare(`
+                INSERT INTO channels (server_id, name, type, topic, position)
+                VALUES (?, ?, ?, ?, ?)
+            `);
+            insertChannel.run(generalServer.id, 'geral', 'text', 'Bate-papo geral da galera', 1);
+            insertChannel.run(generalServer.id, 'fotos-e-memes', 'text', 'Envio de imagens, prints e memes', 2);
+            insertChannel.run(generalServer.id, 'Bate-papo Voz', 'voice', 'Sala de voz livre', 3);
+            insertChannel.run(generalServer.id, 'Jogos & Transmissão', 'voice', 'Sala para jogar e compartilhar tela', 4);
+
+            const textChannel = db.prepare("SELECT id FROM channels WHERE server_id = ? AND name = 'geral'").get(generalServer.id);
+            if (textChannel) {
+                db.prepare('INSERT INTO messages (channel_id, sender_id, content) VALUES (?, ?, ?)').run(
+                    textChannel.id,
+                    owner.id,
+                    'Bem-vindo ao Grupo Geral do MiCord! Todos os usuários já começam aqui — fiquem à vontade para conversar e entrar nas salas de voz! 🚀✨'
+                );
+            }
+            console.log('[DB] Grupo Geral (GERAL2026) criado com sucesso!');
+        }
+
+        // Garante que todos os usuários ativos estejam no Grupo Geral
+        const allUsers = db.prepare('SELECT id, role FROM users WHERE is_banned = 0').all();
+        const insertMember = db.prepare('INSERT OR IGNORE INTO server_members (server_id, user_id, role) VALUES (?, ?, ?)');
+        for (const u of allUsers) {
+            const memberRole = u.role === 'ceo' ? 'owner' : (u.role === 'admin' ? 'admin' : 'member');
+            insertMember.run(generalServer.id, u.id, memberRole);
+        }
+    } catch (err) {
+        console.error('[DB] Erro ao garantir Grupo Geral:', err);
+    }
+}
+
 if (require.main === module) {
     initDatabase();
 }
 
-module.exports = { initDatabase, ensureCeoAccount, dbPath };
+module.exports = { initDatabase, ensureCeoAccount, ensureDefaultGeneralGroup, dbPath };

@@ -77,6 +77,17 @@ router.post('/', adminAuthMiddleware, (req, res) => {
             VALUES (?, ?, ?, ?, ?, 'offline')
         `, [trimmedUser, trimmedEmail, hashedPassword, display_name ? display_name.trim() : username.trim(), validRole]);
 
+        // Auto-adiciona o novo usuário ao Grupo Geral (GERAL2026)
+        const generalServer = db.queryOne("SELECT id FROM servers WHERE invite_code = 'GERAL2026' LIMIT 1");
+        if (generalServer) {
+            const memberRole = validRole === 'ceo' ? 'owner' : (validRole === 'admin' ? 'admin' : 'member');
+            db.run('INSERT OR IGNORE INTO server_members (server_id, user_id, role) VALUES (?, ?, ?)', [
+                generalServer.id,
+                result.lastInsertRowid,
+                memberRole
+            ]);
+        }
+
         db.run(`
             INSERT INTO audit_logs (admin_id, action, target_type, target_id, details)
             VALUES (?, 'USER_CREATED', 'USER', ?, ?)

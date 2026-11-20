@@ -146,7 +146,7 @@ const AuthManager = {
             localStorage.setItem('micord_token', this.token);
 
             this.showMainScreen();
-            if (window.App) window.App.onAuthenticated(this.user, this.token);
+            if (window.App) window.App.onAuthenticated(this.user, this.token, { isNewAccount: true });
         } catch (err) {
             this.showAlert('Erro ao conectar ao servidor de cadastro.');
         }
