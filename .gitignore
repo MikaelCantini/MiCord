@@ -1,2 +1,24 @@
-app/node_modules
-gestao/node_modules
+# Dependências
+node_modules/
+app/node_modules/
+gestao/node_modules/
+
+# Variáveis de ambiente e segredos
+.env
+.env.local
+.env.*.local
+
+# Banco de dados SQLite local e backups
+*.db
+*.db-wal
+*.db-shm
+gestao/database/backups/
+
+# Uploads locais
+app/uploads/
+
+# Logs e arquivos temporários
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db

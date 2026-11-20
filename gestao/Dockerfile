@@ -1,11 +1,21 @@
-FROM node:lts-alpine
+FROM node:24-alpine
 
-WORKDIR /app
+WORKDIR /workspace/gestao
 
-COPY package*.json ./
-RUN npm ci --production
+# Instala apenas dependências de produção do Painel de Gestão
+COPY gestao/package*.json ./
+RUN npm ci --omit=dev
 
-COPY . .
+# Copia código do Painel de Gestão
+COPY gestao/ ./
 
-EXPOSE 3000
-CMD ["npm", "start"]
+# Garante que o diretório de dados exista
+RUN mkdir -p /data
+
+ENV NODE_ENV=production
+ENV PORT=3001
+ENV DB_PATH=/data/app.db
+
+EXPOSE 3001
+
+CMD ["node", "server.js"]

@@ -1,22 +1,38 @@
-version: '3.8'
-
 services:
-  voice-chat:
+  micord-app:
+    container_name: micord-app
     build:
-      context: ./app
-    restart: always
+      context: .
+      dockerfile: app/Dockerfile
+    restart: unless-stopped
     ports:
-      - "3001:3001"
-    environment:
-      - NODE_ENV=production
-      - PORT=3001
-
-  admin-panel:
-    build:
-      context: ./gestao
-    restart: always
-    ports:
-      - "3000:3000"
+      - "${APP_PORT:-3000}:3000"
     environment:
       - NODE_ENV=production
       - PORT=3000
+      - DB_PATH=/data/app.db
+      - UPLOAD_DIR=/uploads
+      - JWT_SECRET=${APP_JWT_SECRET:-micord_super_secret_jwt_key_2026}
+    volumes:
+      - micord_data:/data
+      - micord_uploads:/uploads
+
+  micord-gestao:
+    container_name: micord-gestao
+    build:
+      context: .
+      dockerfile: gestao/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${GESTAO_PORT:-3001}:3001"
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - DB_PATH=/data/app.db
+      - JWT_SECRET=${GESTAO_JWT_SECRET:-micord_gestao_admin_secret_key_2026}
+    volumes:
+      - micord_data:/data
+
+volumes:
+  micord_data:
+  micord_uploads:

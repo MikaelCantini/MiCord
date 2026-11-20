@@ -29,7 +29,7 @@ router.get('/', adminAuthMiddleware, (req, res) => {
 // 2. Criar backup do banco de dados SQLite
 router.post('/backup', adminAuthMiddleware, (req, res) => {
     try {
-        const backupDir = path.resolve(__dirname, '..', '..', 'database', 'backups');
+        const backupDir = path.join(path.dirname(config.DB_PATH), 'backups');
         if (!fs.existsSync(backupDir)) {
             fs.mkdirSync(backupDir, { recursive: true });
         }

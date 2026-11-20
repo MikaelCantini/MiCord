@@ -1,11 +1,12 @@
 const path = require('path');
 const fs = require('fs');
 const { DatabaseSync } = require('node:sqlite');
+const config = require('./config');
 
-const dbPath = path.resolve(__dirname, '..', '..', 'gestao', 'database', 'app.db');
+const dbPath = config.DB_PATH;
 
 if (!fs.existsSync(dbPath)) {
-    console.log('[App DB] Banco de dados em gestao/database/app.db não encontrado. Inicializando...');
+    console.log(`[App DB] Banco de dados em ${dbPath} não encontrado. Inicializando...`);
     const { initDatabase } = require('../../gestao/database/initDb');
     initDatabase();
 }

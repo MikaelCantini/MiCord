@@ -46,7 +46,7 @@ app.get('/assets/default-avatar-admin.png', (req, res) => {
 });
 
 app.use(express.static(path.join(__dirname, 'public')));
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+app.use('/uploads', express.static(config.UPLOAD_DIR));
 
 // Rotas da API
 app.use('/api/auth', authRoutes);
@@ -66,7 +66,7 @@ server.listen(config.PORT, () => {
     console.log(`=======================================================`);
     console.log(`🚀 MiCord Chat App está rodando com sucesso!`);
     console.log(`📡 URL Principal: http://localhost:${config.PORT}`);
-    console.log(`💾 Conectado ao banco de dados em gestao/database/app.db`);
+    console.log(`💾 Conectado ao banco de dados em ${config.DB_PATH}`);
     console.log(`=======================================================`);
 });
 

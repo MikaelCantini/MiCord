@@ -3,7 +3,7 @@ const path = require('path');
 const { DatabaseSync } = require('node:sqlite');
 const bcrypt = require('bcryptjs');
 
-const dbPath = path.resolve(__dirname, 'app.db');
+const dbPath = process.env.DB_PATH || path.resolve(__dirname, 'app.db');
 const schemaPath = path.resolve(__dirname, 'schema.sql');
 
 function initDatabase() {

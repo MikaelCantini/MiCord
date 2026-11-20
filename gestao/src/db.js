@@ -1,7 +1,15 @@
-const path = require('path');
+const fs = require('fs');
 const { DatabaseSync } = require('node:sqlite');
+const config = require('./config');
 
-const dbPath = path.resolve(__dirname, '..', 'database', 'app.db');
+const dbPath = config.DB_PATH;
+
+if (!fs.existsSync(dbPath)) {
+    console.log(`[Gestao DB] Banco de dados em ${dbPath} não encontrado. Inicializando...`);
+    const { initDatabase } = require('../database/initDb');
+    initDatabase();
+}
+
 const db = new DatabaseSync(dbPath);
 
 // Otimizações SQLite para múltiplos processos simultâneos

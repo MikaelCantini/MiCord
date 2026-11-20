@@ -1,0 +1,15 @@
+.git
+.gitignore
+node_modules
+app/node_modules
+gestao/node_modules
+app/uploads
+gestao/database/*.db
+gestao/database/*.db-wal
+gestao/database/*.db-shm
+gestao/database/backups
+.env
+.env.*
+*.log
+start-all.bat
+resumo-projeto.md
