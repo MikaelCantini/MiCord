@@ -64,7 +64,7 @@ app.get('*', (req, res) => {
 
 server.listen(config.PORT, () => {
     console.log(`=======================================================`);
-    console.log(`🚀 CSGONADES CHAT APP está rodando com sucesso!`);
+    console.log(`🚀 MiCord Chat App está rodando com sucesso!`);
     console.log(`📡 URL Principal: http://localhost:${config.PORT}`);
     console.log(`💾 Conectado ao banco de dados em gestao/database/app.db`);
     console.log(`=======================================================`);

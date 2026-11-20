@@ -1,5 +1,5 @@
 {
-  "name": "csgonades-chat-app",
+  "name": "micord-chat-app",
   "version": "1.0.0",
   "description": "Aplicativo de conversa, grupos, voz, video e compartilhamento de tela",
   "main": "server.js",

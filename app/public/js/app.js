@@ -1,5 +1,5 @@
 // ===================================================================
-// ORQUESTRADOR PRINCIPAL DO CSGONADES CHAT APP
+// ORQUESTRADOR PRINCIPAL DO MiCord CHAT APP
 // ===================================================================
 
 const App = {
@@ -7,7 +7,7 @@ const App = {
     audioCtx: null,
 
     async init() {
-        console.log('[App] Inicializando CSGONADES Chat...');
+        console.log('[App] Inicializando MiCord Chat...');
         
         // Inicializa gerenciadores
         window.AuthManager.init();

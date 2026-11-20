@@ -100,9 +100,14 @@ router.put('/:id', adminAuthMiddleware, (req, res) => {
             return res.status(404).json({ error: 'Usuário não encontrado.' });
         }
 
+        let passwordChanged = false;
         if (password && password.trim()) {
+            if (password.trim().length < 4) {
+                return res.status(400).json({ error: 'A nova senha deve ter no mínimo 4 caracteres.' });
+            }
             const hashedPassword = bcrypt.hashSync(password.trim(), 10);
             db.run('UPDATE users SET password = ? WHERE id = ?', [hashedPassword, userId]);
+            passwordChanged = true;
         }
 
         const validRole = ['admin', 'moderator', 'user'].includes(role) ? role : user.role;
@@ -123,13 +128,47 @@ router.put('/:id', adminAuthMiddleware, (req, res) => {
         db.run(`
             INSERT INTO audit_logs (admin_id, action, target_type, target_id, details)
             VALUES (?, 'USER_UPDATED', 'USER', ?, ?)
-        `, [req.admin.id, userId.toString(), `Dados do usuário ${user.username} atualizados.`]);
+        `, [
+            req.admin.id,
+            userId.toString(),
+            `Dados do usuário ${user.username} atualizados${passwordChanged ? ' (incluindo senha)' : ''}.`
+        ]);
 
         const updated = db.queryOne('SELECT id, username, email, display_name, role, is_banned, status FROM users WHERE id = ?', [userId]);
         return res.json(updated);
     } catch (err) {
         console.error('Erro ao atualizar usuário:', err);
         return res.status(500).json({ error: 'Erro ao atualizar usuário.' });
+    }
+});
+
+// 3b. Alterar senha de um usuário
+router.put('/:id/password', adminAuthMiddleware, (req, res) => {
+    try {
+        const userId = parseInt(req.params.id);
+        const { password } = req.body;
+
+        if (!password || !password.trim() || password.trim().length < 4) {
+            return res.status(400).json({ error: 'A nova senha deve ter no mínimo 4 caracteres.' });
+        }
+
+        const user = db.queryOne('SELECT id, username FROM users WHERE id = ?', [userId]);
+        if (!user) {
+            return res.status(404).json({ error: 'Usuário não encontrado.' });
+        }
+
+        const hashedPassword = bcrypt.hashSync(password.trim(), 10);
+        db.run('UPDATE users SET password = ? WHERE id = ?', [hashedPassword, userId]);
+
+        db.run(`
+            INSERT INTO audit_logs (admin_id, action, target_type, target_id, details)
+            VALUES (?, 'PASSWORD_CHANGED', 'USER', ?, ?)
+        `, [req.admin.id, userId.toString(), `Senha do usuário ${user.username} alterada pelo administrador.`]);
+
+        return res.json({ message: `Senha do usuário ${user.username} alterada com sucesso!` });
+    } catch (err) {
+        console.error('Erro ao alterar senha do usuário:', err);
+        return res.status(500).json({ error: 'Erro ao alterar senha do usuário.' });
     }
 });
 

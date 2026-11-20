@@ -1,5 +1,5 @@
 /* ===================================================================
-   CSGONADES CHAT APP - TEMA BRANCO COM ROSA CLARO & MODO ESCURO
+   MiCord CHAT APP - TEMA BRANCO COM ROSA CLARO & MODO ESCURO
    =================================================================== */
 
 :root {
@@ -272,24 +272,6 @@ body {
 
 .btn-block {
     width: 100%;
-}
-
-.demo-quick-login {
-    margin-top: 14px;
-    padding-top: 14px;
-    border-top: 1px dashed var(--border-color);
-}
-
-.quick-title {
-    font-size: 0.78rem;
-    color: var(--text-muted);
-    margin-bottom: 8px;
-    font-weight: 600;
-}
-
-.quick-buttons {
-    display: flex;
-    gap: 8px;
 }
 
 .btn-chip {

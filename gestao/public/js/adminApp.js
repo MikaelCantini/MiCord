@@ -1,21 +1,22 @@
 // ===================================================================
-// CONTROLADOR DO PAINEL DE GESTÃO - CSGONADES
+// CONTROLADOR DO PAINEL DE GESTÃO - MiCord
 // ===================================================================
 
 const AdminApp = {
     token: null,
     admin: null,
     currentTab: 'overview',
+    usersMap: {},
 
     init() {
-        this.token = localStorage.getItem('csgonades_admin_token');
+        this.token = localStorage.getItem('micord_admin_token');
         this.initTheme();
         this.bindEvents();
         this.checkAuth();
     },
 
     initTheme() {
-        const saved = localStorage.getItem('csgonades_admin_theme') || 'light';
+        const saved = localStorage.getItem('micord_admin_theme') || 'light';
         this.applyTheme(saved);
 
         document.getElementById('btn-theme-toggle')?.addEventListener('click', () => {
@@ -26,7 +27,7 @@ const AdminApp = {
 
     applyTheme(theme) {
         document.documentElement.setAttribute('data-theme', theme);
-        localStorage.setItem('csgonades_admin_theme', theme);
+        localStorage.setItem('micord_admin_theme', theme);
         const icon = document.getElementById('btn-theme-toggle');
         if (icon) icon.textContent = theme === 'dark' ? '☀️' : '🌙';
     },
@@ -71,6 +72,16 @@ const AdminApp = {
         document.getElementById('form-user-edit')?.addEventListener('submit', async (e) => {
             e.preventDefault();
             await this.saveUser();
+        });
+
+        // Modal de Alterar Senha
+        document.getElementById('modal-password-close')?.addEventListener('click', () => {
+            document.getElementById('modal-password').style.display = 'none';
+        });
+
+        document.getElementById('form-user-password')?.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            await this.saveUserPassword();
         });
 
         // Banco de Dados: Backup e Vacuum
@@ -127,7 +138,7 @@ const AdminApp = {
 
             this.token = data.token;
             this.admin = data.admin;
-            localStorage.setItem('csgonades_admin_token', this.token);
+            localStorage.setItem('micord_admin_token', this.token);
             this.showDashboard();
         } catch (err) {
             errorEl.textContent = 'Erro ao conectar ao servidor de gestão.';
@@ -136,7 +147,7 @@ const AdminApp = {
     },
 
     logout() {
-        localStorage.removeItem('csgonades_admin_token');
+        localStorage.removeItem('micord_admin_token');
         this.token = null;
         this.admin = null;
         this.showLogin();
@@ -263,8 +274,10 @@ const AdminApp = {
             const users = await res.json();
             const tbody = document.getElementById('table-users-list');
             tbody.innerHTML = '';
+            this.usersMap = {};
 
             users.forEach(u => {
+                this.usersMap[u.id] = u;
                 const tr = document.createElement('tr');
                 tr.innerHTML = `
                     <td>#${u.id}</td>
@@ -275,7 +288,8 @@ const AdminApp = {
                     <td>${u.servers_count}</td>
                     <td>${u.messages_count}</td>
                     <td>
-                        <button class="btn btn-sm btn-secondary" onclick="AdminApp.editUser(${JSON.stringify(u).replace(/"/g, '&quot;')})">Editar</button>
+                        <button class="btn btn-sm btn-secondary" onclick="AdminApp.editUser(${u.id})">Editar</button>
+                        <button class="btn btn-sm btn-secondary" title="Alterar Senha" onclick="AdminApp.openPasswordModal(${u.id})">🔑 Senha</button>
                         <button class="btn btn-sm ${u.is_banned ? 'btn-secondary' : 'btn-danger'}" onclick="AdminApp.toggleBan(${u.id}, ${u.is_banned})">
                             ${u.is_banned ? 'Desbanir' : 'Banir'}
                         </button>
@@ -293,25 +307,93 @@ const AdminApp = {
         document.getElementById('modal-user-title').textContent = 'Novo Usuário';
         document.getElementById('edit-user-id').value = '';
         document.getElementById('grp-username').style.display = 'flex';
-        document.getElementById('edit-username').value = '';
+        const usernameInput = document.getElementById('edit-username');
+        usernameInput.value = '';
+        usernameInput.required = true;
         document.getElementById('edit-display-name').value = '';
         document.getElementById('edit-email').value = '';
-        document.getElementById('edit-password').value = '';
+        const passwordInput = document.getElementById('edit-password');
+        passwordInput.value = '';
+        passwordInput.required = true;
         document.getElementById('lbl-password').textContent = 'Senha Provisória';
         document.getElementById('edit-role').value = 'user';
         document.getElementById('modal-user').style.display = 'flex';
     },
 
-    editUser(user) {
+    editUser(userId) {
+        const user = this.usersMap[userId];
+        if (!user) return;
         document.getElementById('modal-user-title').textContent = `Editar Usuário #${user.id}`;
         document.getElementById('edit-user-id').value = user.id;
         document.getElementById('grp-username').style.display = 'none'; // username imutável
+        const usernameInput = document.getElementById('edit-username');
+        usernameInput.value = user.username || '';
+        usernameInput.required = false;
         document.getElementById('edit-display-name').value = user.display_name || '';
         document.getElementById('edit-email').value = user.email || '';
-        document.getElementById('edit-password').value = '';
+        const passwordInput = document.getElementById('edit-password');
+        passwordInput.value = '';
+        passwordInput.required = false;
         document.getElementById('lbl-password').textContent = 'Nova Senha (deixe vazio se não quiser alterar)';
         document.getElementById('edit-role').value = user.role || 'user';
         document.getElementById('modal-user').style.display = 'flex';
+    },
+
+    openPasswordModal(userId) {
+        const user = this.usersMap[userId];
+        if (!user) return;
+        document.getElementById('modal-password-title').textContent = `Alterar Senha — #${user.id}`;
+        document.getElementById('pwd-user-id').value = user.id;
+        document.getElementById('pwd-user-info').textContent = `Usuário: ${user.display_name || user.username} (@${user.username})`;
+        document.getElementById('pwd-new-password').value = '';
+        document.getElementById('pwd-confirm-password').value = '';
+        const errBox = document.getElementById('pwd-error-box');
+        errBox.style.display = 'none';
+        errBox.textContent = '';
+        document.getElementById('modal-password').style.display = 'flex';
+    },
+
+    async saveUserPassword() {
+        const id = document.getElementById('pwd-user-id').value;
+        const password = document.getElementById('pwd-new-password').value;
+        const confirmPassword = document.getElementById('pwd-confirm-password').value;
+        const errBox = document.getElementById('pwd-error-box');
+        errBox.style.display = 'none';
+
+        if (!password || password.trim().length < 4) {
+            errBox.textContent = 'A nova senha deve ter no mínimo 4 caracteres.';
+            errBox.style.display = 'block';
+            return;
+        }
+
+        if (password !== confirmPassword) {
+            errBox.textContent = 'As senhas não coincidem.';
+            errBox.style.display = 'block';
+            return;
+        }
+
+        try {
+            const res = await fetch(`/api/admin/users/${id}/password`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${this.token}`
+                },
+                body: JSON.stringify({ password })
+            });
+
+            const data = await res.json();
+            if (res.ok) {
+                document.getElementById('modal-password').style.display = 'none';
+                this.showToast(data.message || 'Senha alterada com sucesso!');
+            } else {
+                errBox.textContent = data.error || 'Erro ao alterar senha.';
+                errBox.style.display = 'block';
+            }
+        } catch (e) {
+            errBox.textContent = 'Falha na comunicação com o servidor.';
+            errBox.style.display = 'block';
+        }
     },
 
     async saveUser() {

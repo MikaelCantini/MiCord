@@ -1,5 +1,5 @@
 {
-  "name": "csgonades",
+  "name": "micord",
   "version": "1.0.0",
   "description": "Aplicativo de conversa, voz, vídeo, grupos e painel de gestão com banco de dados SQLite",
   "scripts": {

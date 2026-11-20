@@ -3,7 +3,7 @@ const { fork } = require('child_process');
 const path = require('path');
 
 console.log('================================================================');
-console.log('🌸 INICIANDO AMBIENTE COMPLETO CSGONADES 🌸');
+console.log('🌸 INICIANDO AMBIENTE COMPLETO MiCord 🌸');
 console.log('================================================================');
 
 // 1. Inicia o Painel de Gestão (Banco de Dados e Administração)
@@ -15,7 +15,7 @@ const appPath = path.resolve(__dirname, 'app', 'server.js');
 const appProcess = fork(appPath, [], { stdio: 'inherit' });
 
 function shutdown() {
-    console.log('\n[CSGONADES] Encerrando servidores...');
+    console.log('\n[MiCord] Encerrando servidores...');
     gestaoProcess.kill();
     appProcess.kill();
     process.exit(0);

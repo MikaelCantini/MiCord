@@ -32,10 +32,9 @@ app.get('*', (req, res) => {
 
 app.listen(config.PORT, () => {
     console.log(`=======================================================`);
-    console.log(`🛡️ PAINEL DE GESTÃO E BANCO DE DADOS está rodando!`);
+    console.log(`🛡️ PAINEL DE GESTÃO MiCord está rodando!`);
     console.log(`📡 URL da Gestão: http://localhost:${config.PORT}`);
     console.log(`💾 Banco de Dados SQLite: ${config.DB_PATH}`);
-    console.log(`🔑 Login padrão: admin@csgonades.local / admin123`);
     console.log(`=======================================================`);
 });
 

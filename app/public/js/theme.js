@@ -1,7 +1,7 @@
 // Controle de Tema: Branco com Rosa Claro (Padrão) / Modo Escuro
 const ThemeManager = {
     init() {
-        const savedTheme = localStorage.getItem('csgonades_theme') || 'light';
+        const savedTheme = localStorage.getItem('micord_theme') || 'light';
         this.applyTheme(savedTheme);
 
         const toggleBtn = document.getElementById('btn-toggle-theme');
@@ -12,7 +12,7 @@ const ThemeManager = {
 
     applyTheme(theme) {
         document.documentElement.setAttribute('data-theme', theme);
-        localStorage.setItem('csgonades_theme', theme);
+        localStorage.setItem('micord_theme', theme);
 
         const icon = document.getElementById('theme-icon');
         if (icon) {

@@ -4,7 +4,7 @@ const AuthManager = {
     token: null,
 
     init() {
-        this.token = localStorage.getItem('csgonades_token');
+        this.token = localStorage.getItem('micord_token');
         this.bindEvents();
     },
 
@@ -53,19 +53,6 @@ const AuthManager = {
             const email = document.getElementById('reg-email').value;
             const password = document.getElementById('reg-password').value;
             await this.register(username, display_name, email, password);
-        });
-
-        // Botões de login rápido para testes
-        document.getElementById('demo-admin-btn')?.addEventListener('click', () => {
-            document.getElementById('login-email').value = 'admin@csgonades.local';
-            document.getElementById('login-password').value = 'admin123';
-            this.login('admin@csgonades.local', 'admin123');
-        });
-
-        document.getElementById('demo-amigo-btn')?.addEventListener('click', () => {
-            document.getElementById('login-email').value = 'amigo@csgonades.local';
-            document.getElementById('login-password').value = 'amigo123';
-            this.login('amigo@csgonades.local', 'amigo123');
         });
 
         // Modal de Perfil e Logout
@@ -124,7 +111,7 @@ const AuthManager = {
 
             this.token = data.token;
             this.user = data.user;
-            localStorage.setItem('csgonades_token', this.token);
+            localStorage.setItem('micord_token', this.token);
 
             this.showMainScreen();
             if (window.App) window.App.onAuthenticated(this.user, this.token);
@@ -150,7 +137,7 @@ const AuthManager = {
 
             this.token = data.token;
             this.user = data.user;
-            localStorage.setItem('csgonades_token', this.token);
+            localStorage.setItem('micord_token', this.token);
 
             this.showMainScreen();
             if (window.App) window.App.onAuthenticated(this.user, this.token);
@@ -222,14 +209,14 @@ const AuthManager = {
     },
 
     logout() {
-        localStorage.removeItem('csgonades_token');
+        localStorage.removeItem('micord_token');
         this.token = null;
         this.user = null;
         window.location.reload();
     },
 
     logoutSilently() {
-        localStorage.removeItem('csgonades_token');
+        localStorage.removeItem('micord_token');
         this.token = null;
         this.user = null;
         this.showAuthScreen();

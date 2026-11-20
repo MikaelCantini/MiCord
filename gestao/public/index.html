@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Painel de Gestão - CSGONADES</title>
+    <title>Painel de Gestão - MiCord</title>
     <link rel="stylesheet" href="/css/admin.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -23,11 +23,11 @@
                 <form id="admin-login-form">
                     <div class="form-group">
                         <label for="admin-email">E-mail ou Usuário Admin</label>
-                        <input type="text" id="admin-email" value="admin@csgonades.local" required autocomplete="username">
+                        <input type="text" id="admin-email" placeholder="seu@email.com" required autocomplete="username">
                     </div>
                     <div class="form-group">
                         <label for="admin-password">Senha de Administrador</label>
-                        <input type="password" id="admin-password" value="admin123" required autocomplete="current-password">
+                        <input type="password" id="admin-password" placeholder="••••••••" required autocomplete="current-password">
                     </div>
                     <button type="submit" class="btn btn-primary btn-block">Entrar na Gestão</button>
                     <div id="admin-login-error" class="alert-box error" style="display: none;"></div>
@@ -43,7 +43,7 @@
                 <div class="sidebar-brand">
                     <span class="brand-icon">🛡️</span>
                     <div>
-                        <h3>CSGONADES</h3>
+                        <h3>MiCord</h3>
                         <small>Gestão & Banco de Dados</small>
                     </div>
                 </div>
@@ -301,7 +301,7 @@
                                     <ul class="info-list">
                                         <li><strong>Engine:</strong> SQLite 3 (Node.js nativo <code>node:sqlite</code>)</li>
                                         <li><strong>Modo Journal:</strong> WAL (Write-Ahead Logging para concorrência simultânea)</li>
-                                        <li><strong>Localização do Arquivo:</strong> <code>csgonades/gestao/database/app.db</code></li>
+                                        <li><strong>Localização do Arquivo:</strong> <code>micord/gestao/database/app.db</code></li>
                                         <li><strong>Integridade Chaves Estrangeiras:</strong> Ativada (ON)</li>
                                     </ul>
                                     <div class="db-action-buttons">
@@ -351,6 +351,30 @@
                         </select>
                     </div>
                     <button type="submit" class="btn btn-primary btn-block">Salvar Usuário</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- MODAL: ALTERAR SENHA DO USUÁRIO -->
+        <div id="modal-password" class="modal-overlay" style="display: none;">
+            <div class="modal-card">
+                <div class="modal-header">
+                    <h3 id="modal-password-title">Alterar Senha</h3>
+                    <button class="modal-close" id="modal-password-close">✕</button>
+                </div>
+                <form id="form-user-password" class="modal-body">
+                    <input type="hidden" id="pwd-user-id">
+                    <p id="pwd-user-info" style="margin: 0 0 12px 0; color: var(--text-muted); font-size: 0.9rem;"></p>
+                    <div class="form-group">
+                        <label for="pwd-new-password">Nova Senha</label>
+                        <input type="password" id="pwd-new-password" placeholder="Mínimo 4 caracteres" minlength="4" required autocomplete="new-password">
+                    </div>
+                    <div class="form-group">
+                        <label for="pwd-confirm-password">Confirmar Nova Senha</label>
+                        <input type="password" id="pwd-confirm-password" placeholder="Repita a nova senha" minlength="4" required autocomplete="new-password">
+                    </div>
+                    <div id="pwd-error-box" class="alert-box error" style="display: none;"></div>
+                    <button type="submit" class="btn btn-primary btn-block">Salvar Nova Senha</button>
                 </form>
             </div>
         </div>

@@ -1,5 +1,5 @@
 {
-  "name": "csgonades-gestao",
+  "name": "micord-gestao",
   "version": "1.0.0",
   "description": "Painel de Gestao e Banco de Dados para controle dos usuarios",
   "main": "server.js",

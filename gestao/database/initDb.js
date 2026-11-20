@@ -36,12 +36,12 @@ function initDatabase() {
         `);
         insertAdmin.run(
             'admin',
-            'admin@csgonades.local',
+            'admin@micord.local',
             hashedPassword,
             'Administrador do Sistema',
             'admin',
             'online',
-            'Administrador geral do sistema csgonades.',
+            'Administrador geral do sistema MiCord.',
             '/assets/default-avatar-admin.png'
         );
 
@@ -49,7 +49,7 @@ function initDatabase() {
         const hashedUserPass = bcrypt.hashSync('amigo123', 10);
         insertAdmin.run(
             'amigo_demo',
-            'amigo@csgonades.local',
+            'amigo@micord.local',
             hashedUserPass,
             'Amigo Demo',
             'user',
