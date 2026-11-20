@@ -225,6 +225,17 @@ const ServersManager = {
 
     joinVoiceChannel(channel) {
         if (!window.App.socket) return;
+
+        // Se já está conectado nesta mesma sala de voz, apenas volta para a tela da sala sem reconectar nem bugar o áudio
+        if (window.WebRTCManager && window.WebRTCManager.currentChannelId === channel.id) {
+            window.WebRTCManager.showRoomView(channel.name || `Sala de Voz #${channel.id}`);
+            window.WebRTCManager.renderAllTiles();
+            return;
+        }
+
+        if (window.WebRTCManager) {
+            window.WebRTCManager.currentChannelName = channel.name || `Sala de Voz #${channel.id}`;
+        }
         window.App.socket.emit('voice:join-room', { channelId: channel.id });
     },
 
