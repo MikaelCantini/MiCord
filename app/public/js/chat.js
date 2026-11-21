@@ -165,6 +165,27 @@ const ChatManager = {
             }
         }
 
+        const youtubeIds = msg.content ? this.extractYouTubeIds(msg.content) : [];
+        let youtubeHtml = '';
+        if (youtubeIds.length > 0) {
+            youtubeHtml = youtubeIds.map((videoId, idx) => {
+                const cardId = `yt-card-${msg.id || Date.now()}-${idx}-${videoId}`;
+                return `
+                    <div class="youtube-embed-card" id="${cardId}" data-yt-id="${videoId}">
+                        <div class="youtube-embed-meta">
+                            <span class="youtube-provider">YouTube</span>
+                            <a href="https://www.youtube.com/watch?v=${videoId}" target="_blank" rel="noopener noreferrer" class="youtube-title" id="${cardId}-title">Vídeo do YouTube</a>
+                            <span class="youtube-author" id="${cardId}-author"></span>
+                        </div>
+                        <div class="youtube-thumb-wrapper" onclick="ChatManager.playYouTubeEmbed('${cardId}', '${videoId}')" title="Clique para reproduzir o vídeo">
+                            <img src="https://i.ytimg.com/vi/${videoId}/hqdefault.jpg" alt="Miniatura do YouTube" class="youtube-thumb-img" loading="lazy">
+                            <button type="button" class="youtube-play-btn" aria-label="Reproduzir vídeo">▶</button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
         div.innerHTML = `
             <img src="${msg.avatar_url || '/assets/default-avatar.png'}" class="message-avatar clickable-user" alt="${msg.display_name}" title="Ver perfil" onclick="window.App.openUserProfileModal(${msg.sender_id})">
             <div class="message-body">
@@ -173,21 +194,80 @@ const ChatManager = {
                     <span class="message-time">${timeStr}</span>
                 </div>
                 ${msg.content ? `<div class="message-text">${this.formatMessageText(msg.content)}</div>` : ''}
+                ${youtubeHtml}
                 ${attachmentHtml}
             </div>
         `;
 
         container.appendChild(div);
+
+        // Carrega título e canal do YouTube de forma assíncrona (oEmbed)
+        if (youtubeIds.length > 0) {
+            div.querySelectorAll('.youtube-embed-card').forEach(card => {
+                const videoId = card.getAttribute('data-yt-id');
+                this.loadYouTubeMetadata(card.id, videoId);
+            });
+        }
+
         this.scrollToBottom();
     },
 
     formatMessageText(text) {
-        // Sanitização básica e quebras de linha
+        // Sanitização básica, links clicáveis e quebras de linha
         const sanitized = text
             .replace(/&/g, '&amp;')
             .replace(/</g, '&lt;')
             .replace(/>/g, '&gt;');
-        return sanitized.replace(/\n/g, '<br>');
+        const withLinks = sanitized.replace(
+            /(https?:\/\/[^\s<]+)/gi,
+            '<a href="$1" target="_blank" rel="noopener noreferrer" class="chat-link">$1</a>'
+        );
+        return withLinks.replace(/\n/g, '<br>');
+    },
+
+    extractYouTubeIds(text) {
+        const regex = /(?:https?:\/\/)?(?:www\.|m\.)?(?:youtube\.com\/(?:watch\?(?:[^#\s]*&)?v=|shorts\/|embed\/|live\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/gi;
+        const ids = [];
+        let match;
+        while ((match = regex.exec(text)) !== null) {
+            const id = match[1];
+            if (!ids.includes(id)) {
+                ids.push(id);
+                if (ids.length >= 2) break;
+            }
+        }
+        return ids;
+    },
+
+    async loadYouTubeMetadata(cardId, videoId) {
+        try {
+            const url = `https://www.youtube.com/oembed?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${videoId}`)}&format=json`;
+            const res = await fetch(url);
+            if (!res.ok) return;
+            const data = await res.json();
+            const titleEl = document.getElementById(`${cardId}-title`);
+            const authorEl = document.getElementById(`${cardId}-author`);
+            if (titleEl && data.title) titleEl.textContent = data.title;
+            if (authorEl && data.author_name) authorEl.textContent = data.author_name;
+        } catch (e) {}
+    },
+
+    playYouTubeEmbed(cardId, videoId) {
+        const card = document.getElementById(cardId);
+        if (!card) return;
+        const thumbWrapper = card.querySelector('.youtube-thumb-wrapper');
+        if (!thumbWrapper) return;
+        thumbWrapper.onclick = null;
+        thumbWrapper.innerHTML = `
+            <iframe
+                class="youtube-iframe"
+                src="https://www.youtube.com/embed/${videoId}?autoplay=1&rel=0"
+                title="YouTube video player"
+                frameborder="0"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                allowfullscreen>
+            </iframe>
+        `;
     },
 
     async sendMessage() {

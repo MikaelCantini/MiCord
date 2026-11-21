@@ -1547,3 +1547,116 @@ body {
     background: #e74c3c;
     color: #ffffff;
 }
+
+
+/* ===================================================================
+   LINKS CLICÁVEIS E PRÉ-VISUALIZAÇÃO DE VÍDEOS DO YOUTUBE NO CHAT
+   =================================================================== */
+.chat-link {
+    color: var(--accent-pink);
+    text-decoration: underline;
+    word-break: break-all;
+}
+
+.chat-link:hover {
+    opacity: 0.85;
+}
+
+.youtube-embed-card {
+    margin-top: 8px;
+    max-width: 420px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-left: 4px solid #ff0000;
+    border-radius: var(--radius-md);
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.youtube-embed-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.youtube-provider {
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.youtube-title {
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: var(--accent-pink);
+    text-decoration: none;
+    line-height: 1.3;
+}
+
+.youtube-title:hover {
+    text-decoration: underline;
+}
+
+.youtube-author {
+    font-size: 0.76rem;
+    color: var(--text-muted);
+}
+
+.youtube-thumb-wrapper {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    background: #000000;
+    cursor: pointer;
+}
+
+.youtube-thumb-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+    transition: transform 0.2s ease, opacity 0.2s ease;
+}
+
+.youtube-thumb-wrapper:hover .youtube-thumb-img {
+    transform: scale(1.03);
+    opacity: 0.9;
+}
+
+.youtube-play-btn {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 56px;
+    height: 40px;
+    border-radius: 12px;
+    border: none;
+    background: rgba(255, 0, 0, 0.9);
+    color: #ffffff;
+    font-size: 1.15rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+    transition: background 0.15s ease, transform 0.15s ease;
+}
+
+.youtube-thumb-wrapper:hover .youtube-play-btn {
+    background: #ff0000;
+    transform: translate(-50%, -50%) scale(1.08);
+}
+
+.youtube-iframe {
+    width: 100%;
+    height: 100%;
+    border: none;
+    display: block;
+}
