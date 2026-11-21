@@ -170,6 +170,15 @@ const WebRTCManager = {
             this.removePeer(socketId);
         });
 
+        // Mesma conta entrou na sala de voz em outra guia/dispositivo
+        this.socket.on('voice:disconnected-elsewhere', ({ reason }) => {
+            this.currentChannelId = null;
+            this.leaveRoom();
+            if (window.App) {
+                window.App.showToast(`ℹ️ ${reason || 'Você entrou na sala de voz em outra guia.'}`);
+            }
+        });
+
         // Sinalização WebRTC (Offer, Answer, Candidate)
         this.socket.on('webrtc:signal', async ({ fromSocketId, user, signal }) => {
             if (!this.peersData.has(fromSocketId)) {

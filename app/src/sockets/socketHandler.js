@@ -170,8 +170,23 @@ function setupSocketIO(io) {
         socket.on('voice:join-room', ({ channelId }) => {
             const parsedChannelId = parseInt(channelId);
             
-            // Remove o usuário de qualquer outra sala de voz anterior
+            // Remove esta guia de qualquer outra sala de voz anterior
             leaveCurrentVoiceRoom(socket);
+
+            // Impede duplicação da mesma conta em salas de voz: desconecta qualquer outra guia/dispositivo desta conta
+            const mySockets = userSockets.get(userId);
+            if (mySockets) {
+                mySockets.forEach(otherSocketId => {
+                    if (otherSocketId === socket.id) return;
+                    const otherSocket = io.sockets.sockets.get(otherSocketId);
+                    if (otherSocket && otherSocket.voiceChannelId) {
+                        leaveCurrentVoiceRoom(otherSocket);
+                        otherSocket.emit('voice:disconnected-elsewhere', {
+                            reason: 'Você entrou na sala de voz em outra guia ou dispositivo.'
+                        });
+                    }
+                });
+            }
 
             if (!voiceRooms.has(parsedChannelId)) {
                 voiceRooms.set(parsedChannelId, new Map());
