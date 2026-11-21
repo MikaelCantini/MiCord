@@ -251,7 +251,7 @@ const AdminApp = {
                     <td><strong>${m.display_name || m.username}</strong></td>
                     <td>${m.channel_name ? `#${m.channel_name}` : 'DM Direta'}</td>
                     <td>${m.content ? m.content.substring(0, 45) + (m.content.length > 45 ? '...' : '') : '[Anexo/Foto]'}</td>
-                    <td>${new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</td>
+                    <td>${this.formatBrasiliaTime(m.created_at)}</td>
                 `;
                 msgsTbody.appendChild(tr);
             });
@@ -515,7 +515,7 @@ const AdminApp = {
                     <td>${s.owner_display_name || s.owner_username}</td>
                     <td>${s.member_count}</td>
                     <td>${s.channel_count}</td>
-                    <td>${new Date(s.created_at).toLocaleDateString()}</td>
+                    <td>${this.formatBrasiliaDate(s.created_at)}</td>
                     <td>
                         <button class="btn btn-sm btn-danger" onclick="AdminApp.deleteServer(${s.id}, '${escapeQuotes(s.name)}')">Excluir</button>
                     </td>
@@ -564,7 +564,7 @@ const AdminApp = {
                     <td>${l.target_type || '-'} (${l.target_id || '-'})</td>
                     <td>${l.admin_display_name || l.admin_username || 'Sistema'}</td>
                     <td>${l.details || '-'}</td>
-                    <td>${new Date(l.created_at).toLocaleString()}</td>
+                    <td>${this.formatBrasiliaDateTime(l.created_at)}</td>
                 `;
                 tbody.appendChild(tr);
             });
@@ -655,7 +655,7 @@ const AdminApp = {
                     <td><strong>${safeTitle}</strong></td>
                     <td style="max-width: 320px; white-space: pre-wrap;">${safeDesc}</td>
                     <td><span class="badge-status ${isResolved ? 'active' : 'banned'}">${isResolved ? 'Resolvido' : 'Aberto'}</span></td>
-                    <td>${new Date(b.created_at).toLocaleString()}</td>
+                    <td>${this.formatBrasiliaDateTime(b.created_at)}</td>
                     <td>
                         <button class="btn btn-sm btn-secondary" onclick="AdminApp.toggleBugStatus(${b.id})">${isResolved ? 'Reabrir' : '✓ Resolver'}</button>
                         <button class="btn btn-sm btn-icon" title="Excluir" onclick="AdminApp.deleteBug(${b.id})">🗑️</button>
@@ -698,6 +698,36 @@ const AdminApp = {
         } catch (e) {
             alert('Erro ao excluir bug.');
         }
+    },
+
+    parseUtcDate(dateStr) {
+        if (!dateStr) return new Date();
+        if (dateStr instanceof Date) return dateStr;
+        const s = String(dateStr).trim();
+        if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/.test(s)) {
+            return new Date(s.replace(' ', 'T') + 'Z');
+        }
+        return new Date(s);
+    },
+
+    formatBrasiliaTime(dateStr) {
+        return this.parseUtcDate(dateStr).toLocaleTimeString('pt-BR', {
+            timeZone: 'America/Sao_Paulo',
+            hour: '2-digit',
+            minute: '2-digit'
+        });
+    },
+
+    formatBrasiliaDate(dateStr) {
+        return this.parseUtcDate(dateStr).toLocaleDateString('pt-BR', {
+            timeZone: 'America/Sao_Paulo'
+        });
+    },
+
+    formatBrasiliaDateTime(dateStr) {
+        return this.parseUtcDate(dateStr).toLocaleString('pt-BR', {
+            timeZone: 'America/Sao_Paulo'
+        });
     },
 
     showToast(message) {

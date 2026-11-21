@@ -9,6 +9,7 @@ services:
       - "${APP_PORT:-3000}:3000"
     environment:
       - NODE_ENV=production
+      - TZ=America/Sao_Paulo
       - PORT=3000
       - DB_PATH=/data/app.db
       - UPLOAD_DIR=/uploads
@@ -27,6 +28,7 @@ services:
       - "${GESTAO_PORT:-3001}:3001"
     environment:
       - NODE_ENV=production
+      - TZ=America/Sao_Paulo
       - PORT=3001
       - DB_PATH=/data/app.db
       - JWT_SECRET=${GESTAO_JWT_SECRET:-micord_gestao_admin_secret_key_2026}

@@ -141,8 +141,7 @@ const ChatManager = {
             container.innerHTML = '';
         }
 
-        const date = new Date(msg.created_at);
-        const timeStr = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const timeStr = this.formatBrasiliaTime(msg.created_at);
 
         const div = document.createElement('div');
         div.className = 'message-item';
@@ -210,6 +209,26 @@ const ChatManager = {
         }
 
         this.scrollToBottom();
+    },
+
+    parseUtcDate(dateStr) {
+        if (!dateStr) return new Date();
+        if (dateStr instanceof Date) return dateStr;
+        const s = String(dateStr).trim();
+        // SQLite CURRENT_TIMESTAMP retorna 'YYYY-MM-DD HH:MM:SS' em UTC sem 'Z'
+        if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/.test(s)) {
+            return new Date(s.replace(' ', 'T') + 'Z');
+        }
+        return new Date(s);
+    },
+
+    formatBrasiliaTime(dateStr) {
+        const date = this.parseUtcDate(dateStr);
+        return date.toLocaleTimeString('pt-BR', {
+            timeZone: 'America/Sao_Paulo',
+            hour: '2-digit',
+            minute: '2-digit'
+        });
     },
 
     formatMessageText(text) {

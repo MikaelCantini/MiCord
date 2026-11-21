@@ -1,5 +1,7 @@
 FROM node:24-alpine
 
+RUN apk add --no-cache tzdata
+
 WORKDIR /workspace/app
 
 # Instala apenas dependências de produção do Chat App
@@ -15,6 +17,7 @@ COPY gestao/database/initDb.js /workspace/gestao/database/initDb.js
 RUN mkdir -p /data /uploads
 
 ENV NODE_ENV=production
+ENV TZ=America/Sao_Paulo
 ENV PORT=3000
 ENV DB_PATH=/data/app.db
 ENV UPLOAD_DIR=/uploads
