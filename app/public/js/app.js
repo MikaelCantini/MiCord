@@ -101,15 +101,8 @@ const App = {
         await window.ServersManager.loadServers();
         window.FriendsManager.loadFriendsData();
 
-        // Ao criar conta (ou se já quiser iniciar no Grupo Geral), abre o Grupo Geral automaticamente
-        const generalServer = window.ServersManager.servers.find(s => s.invite_code === 'GERAL2026')
-            || window.ServersManager.servers[0];
-
-        if (options.isNewAccount && generalServer) {
-            await window.ServersManager.selectServer(generalServer.id);
-        } else {
-            this.showHomeView();
-        }
+        // Exibe Hub de Amigos inicial
+        this.showHomeView();
     },
 
     connectSocket(token) {

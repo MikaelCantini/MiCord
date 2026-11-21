@@ -48,20 +48,6 @@ router.post('/register', (req, res) => {
             FROM users WHERE id = ?
         `, [result.lastInsertRowid]);
 
-        // Auto-adiciona o novo usuário ao servidor 'Comunidade Geral' caso ele exista
-        const defaultServer = db.queryOne("SELECT id FROM servers WHERE invite_code = 'GERAL2026' LIMIT 1");
-        if (defaultServer) {
-            try {
-                db.run('INSERT OR IGNORE INTO server_members (server_id, user_id, role) VALUES (?, ?, ?)', [
-                    defaultServer.id,
-                    newUser.id,
-                    'member'
-                ]);
-            } catch (e) {
-                console.error('Falha ao adicionar novo usuário ao servidor geral:', e);
-            }
-        }
-
         const token = jwt.sign({ userId: newUser.id }, config.JWT_SECRET, { expiresIn: '30d' });
 
         return res.status(201).json({

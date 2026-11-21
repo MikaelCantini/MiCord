@@ -62,10 +62,6 @@ const ServersManager = {
             await this.joinServer(invite_code);
         });
 
-        document.getElementById('btn-join-general-group')?.addEventListener('click', async () => {
-            await this.joinServer('GERAL2026');
-        });
-
         // Botões de Sair / Excluir Grupo
         document.getElementById('btn-leave-server')?.addEventListener('click', () => this.leaveCurrentServer());
         document.getElementById('btn-delete-server')?.addEventListener('click', () => this.deleteCurrentServer());
@@ -177,7 +173,7 @@ const ServersManager = {
             const leaveBtn = document.getElementById('btn-leave-server');
             const deleteBtn = document.getElementById('btn-delete-server');
             if (leaveBtn) leaveBtn.style.display = isOwner ? 'none' : 'block';
-            if (deleteBtn) deleteBtn.style.display = (isOwner && serverData.invite_code !== 'GERAL2026') ? 'block' : 'none';
+            if (deleteBtn) deleteBtn.style.display = isOwner ? 'block' : 'none';
 
             // Seleciona o primeiro canal de texto por padrão
             const firstText = serverData.channels.find(c => c.type === 'text');

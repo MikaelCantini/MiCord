@@ -1,7 +1,7 @@
 const fs = require('fs');
 const { DatabaseSync } = require('node:sqlite');
 const config = require('./config');
-const { initDatabase, ensureCeoAccount, ensureDefaultGeneralGroup, ensureBugReportsTable } = require('../database/initDb');
+const { initDatabase, ensureCeoAccount, removeDefaultGeneralGroup, ensureBugReportsTable } = require('../database/initDb');
 
 const dbPath = config.DB_PATH;
 
@@ -17,9 +17,9 @@ db.exec('PRAGMA journal_mode = WAL;');
 db.exec('PRAGMA busy_timeout = 5000;');
 db.exec('PRAGMA foreign_keys = ON;');
 
-// Garante que a conta CEO, o Grupo Geral e a tabela de bugs existam mesmo em bancos já criados
+// Garante que a conta CEO e a tabela de bugs existam e remove o Grupo Geral padrão
 ensureCeoAccount(db);
-ensureDefaultGeneralGroup(db);
+removeDefaultGeneralGroup(db);
 ensureBugReportsTable(db);
 
 module.exports = {

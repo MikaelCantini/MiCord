@@ -21,12 +21,16 @@ const WebRTCManager = {
     isNoiseSuppressionOn: true,
     isMicTestOn: false,
     
-    // Nós Web Audio API para supressão de ruído, noise gate e retorno de voz (teste)
+    // Nós Web Audio API para supressão de ruído, noise gate adaptativo e retorno de voz (teste)
     highpassFilter: null,
+    highpassFilter2: null,
+    presenceFilter: null,
     lowpassFilter: null,
     noiseGateGain: null,
     micTestGain: null,
     lastSpeechTime: 0,
+    gateIsOpen: false,
+    ambientNoiseFloor: 0.008,
     
     // WebRTC PeerConnections Map<peerSocketId, RTCPeerConnection>
     peerConnections: new Map(),
@@ -361,7 +365,8 @@ const WebRTCManager = {
                 audio: {
                     echoCancellation: true,
                     noiseSuppression: this.isNoiseSuppressionOn,
-                    autoGainControl: true,
+                    // Desativa AGC quando supressor está ligado para evitar que o navegador aumente o ruído de fundo no silêncio
+                    autoGainControl: !this.isNoiseSuppressionOn,
                     channelCount: 1,
                     sampleRate: 48000,
                     googNoiseSuppression: this.isNoiseSuppressionOn,
@@ -413,7 +418,7 @@ const WebRTCManager = {
                     await rawTrack.applyConstraints({
                         echoCancellation: true,
                         noiseSuppression: this.isNoiseSuppressionOn,
-                        autoGainControl: true
+                        autoGainControl: !this.isNoiseSuppressionOn
                     });
                 } catch (e) {}
             }
@@ -423,13 +428,19 @@ const WebRTCManager = {
         if (this.audioContext) {
             const now = this.audioContext.currentTime;
             if (this.highpassFilter) {
-                this.highpassFilter.frequency.setTargetAtTime(this.isNoiseSuppressionOn ? 85 : 10, now, 0.03);
+                this.highpassFilter.frequency.setTargetAtTime(this.isNoiseSuppressionOn ? 105 : 10, now, 0.02);
+            }
+            if (this.highpassFilter2) {
+                this.highpassFilter2.frequency.setTargetAtTime(this.isNoiseSuppressionOn ? 105 : 10, now, 0.02);
+            }
+            if (this.presenceFilter) {
+                this.presenceFilter.gain.setTargetAtTime(this.isNoiseSuppressionOn ? 2.5 : 0, now, 0.02);
             }
             if (this.lowpassFilter) {
-                this.lowpassFilter.frequency.setTargetAtTime(this.isNoiseSuppressionOn ? 14000 : 22000, now, 0.03);
+                this.lowpassFilter.frequency.setTargetAtTime(this.isNoiseSuppressionOn ? 10500 : 22000, now, 0.02);
             }
             if (this.noiseGateGain && !this.isNoiseSuppressionOn) {
-                this.noiseGateGain.gain.setTargetAtTime(1.0, now, 0.03);
+                this.noiseGateGain.gain.setTargetAtTime(1.0, now, 0.02);
             }
         }
 
@@ -771,7 +782,7 @@ const WebRTCManager = {
         }
     },
 
-    // Pipeline de Supressor de Ruído (High-Pass + Low-Pass + Compressor + Noise Gate) e detecção de fala
+    // Pipeline Avançado de Supressor de Ruído (High-Pass 4ª ordem + Low-Pass + Presença Vocal + Compressor + Noise Gate Adaptativo por Banda Vocal)
     setupNoiseSuppressionAndVAD(rawStream) {
         try {
             const AudioContextClass = window.AudioContext || window.webkitAudioContext;
@@ -782,54 +793,76 @@ const WebRTCManager = {
 
             const source = this.audioContext.createMediaStreamSource(rawStream);
 
-            // 1. Filtro High-Pass (corta zumbido grave, ventilador, ar-condicionado e batidas na mesa)
+            // 1. Filtro High-Pass em cascata (4ª ordem, -24 dB/oitava em 105 Hz): remove ventilador, zumbido e batidas
             this.highpassFilter = this.audioContext.createBiquadFilter();
             this.highpassFilter.type = 'highpass';
-            this.highpassFilter.frequency.value = this.isNoiseSuppressionOn ? 85 : 10;
-            this.highpassFilter.Q.value = 0.7;
+            this.highpassFilter.frequency.value = this.isNoiseSuppressionOn ? 105 : 10;
+            this.highpassFilter.Q.value = 0.707;
 
-            // 2. Filtro Low-Pass (corta chiado agudo / estática de microfone)
+            this.highpassFilter2 = this.audioContext.createBiquadFilter();
+            this.highpassFilter2.type = 'highpass';
+            this.highpassFilter2.frequency.value = this.isNoiseSuppressionOn ? 105 : 10;
+            this.highpassFilter2.Q.value = 0.707;
+
+            // 2. Filtro Low-Pass (10.5 kHz): corta chiado agudo / estática de microfone
             this.lowpassFilter = this.audioContext.createBiquadFilter();
             this.lowpassFilter.type = 'lowpass';
-            this.lowpassFilter.frequency.value = this.isNoiseSuppressionOn ? 14000 : 22000;
-            this.lowpassFilter.Q.value = 0.7;
+            this.lowpassFilter.frequency.value = this.isNoiseSuppressionOn ? 10500 : 22000;
+            this.lowpassFilter.Q.value = 0.707;
 
-            // 3. Compressor suave (equilibra volume da voz e evita estourar o áudio)
+            // 3. Leve realce na faixa de clareza da voz humana (2.8 kHz)
+            this.presenceFilter = this.audioContext.createBiquadFilter();
+            this.presenceFilter.type = 'peaking';
+            this.presenceFilter.frequency.value = 2800;
+            this.presenceFilter.Q.value = 1.0;
+            this.presenceFilter.gain.value = this.isNoiseSuppressionOn ? 2.5 : 0;
+
+            // 4. Compressor suave (equilibra a voz sem puxar o ruído de fundo)
             const compressor = this.audioContext.createDynamicsCompressor();
-            compressor.threshold.value = -24;
-            compressor.knee.value = 20;
-            compressor.ratio.value = 4;
-            compressor.attack.value = 0.005;
-            compressor.release.value = 0.15;
+            compressor.threshold.value = -20;
+            compressor.knee.value = 24;
+            compressor.ratio.value = 3;
+            compressor.attack.value = 0.006;
+            compressor.release.value = 0.16;
 
-            // 4. Noise Gate suave (silencia ruído de fundo quando você não está falando)
+            // 5. Noise Gate Adaptativo (silencia 100% o ruído ambiente no silêncio)
             this.noiseGateGain = this.audioContext.createGain();
-            this.noiseGateGain.gain.value = 1.0;
+            this.noiseGateGain.gain.value = this.isNoiseSuppressionOn ? 0.0 : 1.0;
 
-            // 5. Retorno de voz para teste do supressor de ruído (desligado por padrão)
+            // 6. Retorno de voz para teste do supressor de ruído (desligado por padrão)
             this.micTestGain = this.audioContext.createGain();
             this.micTestGain.gain.value = this.isMicTestOn ? 1.0 : 0.0;
 
-            // Analyser para detecção de fala e controle do Noise Gate
+            // Analyser para detecção na banda vocal (200 Hz - 3500 Hz) e controle do Noise Gate
             this.analyser = this.audioContext.createAnalyser();
-            this.analyser.fftSize = 512;
-            this.analyser.smoothingTimeConstant = 0.65;
+            this.analyser.fftSize = 1024;
+            this.analyser.smoothingTimeConstant = 0.5;
 
             const destination = this.audioContext.createMediaStreamDestination();
 
             source.connect(this.highpassFilter);
-            this.highpassFilter.connect(this.lowpassFilter);
+            this.highpassFilter.connect(this.highpassFilter2);
+            this.highpassFilter2.connect(this.lowpassFilter);
             this.lowpassFilter.connect(this.analyser);
-            this.lowpassFilter.connect(compressor);
+            this.lowpassFilter.connect(this.presenceFilter);
+            this.presenceFilter.connect(compressor);
             compressor.connect(this.noiseGateGain);
             this.noiseGateGain.connect(destination);
             this.noiseGateGain.connect(this.micTestGain);
             this.micTestGain.connect(this.audioContext.destination);
 
+            const sampleRate = this.audioContext.sampleRate || 48000;
+            const binHz = sampleRate / this.analyser.fftSize;
+            const voiceBinStart = Math.max(1, Math.floor(200 / binHz));
+            const voiceBinEnd = Math.min(this.analyser.frequencyBinCount - 1, Math.ceil(3500 / binHz));
+
             const timeData = new Float32Array(this.analyser.fftSize);
             const freqBuffer = new Uint8Array(this.analyser.frequencyBinCount);
+            this.ambientNoiseFloor = 0.008;
+            this.gateIsOpen = false;
 
             if (this.speechInterval) clearInterval(this.speechInterval);
+            // Loop rápido (16ms) para ataque instantâneo sem picotar início das palavras
             this.speechInterval = setInterval(() => {
                 if (!this.analyser || !this.audioContext) return;
 
@@ -842,36 +875,53 @@ const WebRTCManager = {
                     return;
                 }
 
-                // Calcula RMS (volume real) para o Noise Gate
+                // Energia RMS total + energia específica na faixa vocal (200-3500 Hz)
                 this.analyser.getFloatTimeDomainData(timeData);
                 let rmsSum = 0;
                 for (let i = 0; i < timeData.length; i++) {
                     rmsSum += timeData[i] * timeData[i];
                 }
                 const rms = Math.sqrt(rmsSum / timeData.length);
+
+                this.analyser.getByteFrequencyData(freqBuffer);
+                let voiceSum = 0;
+                const voiceCount = Math.max(1, voiceBinEnd - voiceBinStart + 1);
+                for (let i = voiceBinStart; i <= voiceBinEnd; i++) {
+                    voiceSum += freqBuffer[i];
+                }
+                const voiceAvg = (voiceSum / voiceCount) / 255; // normalizado 0..1
+
+                // Combinação ponderada favorecendo a faixa vocal humana
+                const signalLevel = (voiceAvg * 0.65) + (rms * 0.35);
+
                 const nowMs = Date.now();
                 const nowCtx = this.audioContext.currentTime;
 
                 if (this.isNoiseSuppressionOn && this.noiseGateGain) {
-                    const gateOpenThreshold = 0.012; // Limiar de fala vs ruído de fundo
-                    if (rms > gateOpenThreshold) {
+                    const openThreshold = Math.max(this.ambientNoiseFloor * 2.5, 0.022);
+                    const holdThreshold = Math.max(this.ambientNoiseFloor * 1.6, 0.014);
+
+                    if ((!this.gateIsOpen && signalLevel > openThreshold) || (this.gateIsOpen && signalLevel > holdThreshold)) {
+                        this.gateIsOpen = true;
                         this.lastSpeechTime = nowMs;
-                        // Ataque rápido (15ms) para não cortar o início das palavras
-                        this.noiseGateGain.gain.setTargetAtTime(1.0, nowCtx, 0.015);
-                    } else if (nowMs - this.lastSpeechTime > 350) {
-                        // Release suave após 350ms de silêncio
-                        this.noiseGateGain.gain.setTargetAtTime(0.02, nowCtx, 0.08);
+                        // Ataque ultra-rápido (8ms) -> não corta a primeira sílaba
+                        this.noiseGateGain.gain.setTargetAtTime(1.0, nowCtx, 0.008);
+                    } else if (nowMs - this.lastSpeechTime > 420) {
+                        this.gateIsOpen = false;
+                        // Calibra piso de ruído ambiente apenas quando não está falando
+                        this.ambientNoiseFloor = (this.ambientNoiseFloor * 0.96) + (Math.min(signalLevel, 0.045) * 0.04);
+                        // Fecha suavemente para silêncio total (0.0)
+                        this.noiseGateGain.gain.setTargetAtTime(0.0, nowCtx, 0.06);
                     }
                 } else if (this.noiseGateGain) {
+                    this.gateIsOpen = true;
                     this.noiseGateGain.gain.setTargetAtTime(1.0, nowCtx, 0.02);
                 }
 
                 // Indicador visual de fala (glow verde)
-                this.analyser.getByteFrequencyData(freqBuffer);
-                let sum = 0;
-                for (let i = 0; i < freqBuffer.length; i++) sum += freqBuffer[i];
-                const average = sum / freqBuffer.length;
-                const isSpeakingNow = average > 16 || rms > 0.018;
+                const isSpeakingNow = this.isNoiseSuppressionOn
+                    ? this.gateIsOpen
+                    : (signalLevel > 0.025);
 
                 if (isSpeakingNow !== this.isSpeaking) {
                     this.isSpeaking = isSpeakingNow;
@@ -882,7 +932,7 @@ const WebRTCManager = {
                         selfTile.classList.toggle('speaking', this.isSpeaking);
                     }
                 }
-            }, 40);
+            }, 16);
 
             return destination.stream;
         } catch (e) {
@@ -1535,9 +1585,12 @@ const WebRTCManager = {
             this.audioContext = null;
         }
         this.highpassFilter = null;
+        this.highpassFilter2 = null;
+        this.presenceFilter = null;
         this.lowpassFilter = null;
         this.noiseGateGain = null;
         this.micTestGain = null;
+        this.gateIsOpen = false;
         this.isMicTestOn = false;
         document.getElementById('webrtc-mic-test-btn')?.classList.remove('active');
 

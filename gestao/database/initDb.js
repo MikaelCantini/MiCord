@@ -70,63 +70,17 @@ function initDatabase() {
         insertFriend.run(adminUser.id, demoUser.id);
         insertFriend.run(demoUser.id, adminUser.id);
 
-        // Criar Servidor Padrão
-        const insertServer = db.prepare(`
-            INSERT INTO servers (name, description, owner_id, invite_code)
-            VALUES (?, ?, ?, ?)
-        `);
-        insertServer.run(
-            'Comunidade Geral',
-            'Servidor principal para bater papo, jogar e compartilhar telas!',
-            adminUser.id,
-            'GERAL2026'
-        );
-
-        const defaultServer = db.prepare("SELECT id FROM servers WHERE invite_code = 'GERAL2026'").get();
-
-        // Adicionar admin e demo ao servidor
-        const insertMember = db.prepare(`
-            INSERT INTO server_members (server_id, user_id, role)
-            VALUES (?, ?, ?)
-        `);
-        insertMember.run(defaultServer.id, adminUser.id, 'owner');
-        insertMember.run(defaultServer.id, demoUser.id, 'member');
-
-        // Criar canais padrão de texto e voz/vídeo
-        const insertChannel = db.prepare(`
-            INSERT INTO channels (server_id, name, type, topic, position)
-            VALUES (?, ?, ?, ?, ?)
-        `);
-        insertChannel.run(defaultServer.id, 'geral', 'text', 'Bate-papo geral da galera', 1);
-        insertChannel.run(defaultServer.id, 'fotos-e-memes', 'text', 'Envio de imagens, prints e memes', 2);
-        insertChannel.run(defaultServer.id, 'Bate-papo Voz', 'voice', 'Sala de voz livre', 3);
-        insertChannel.run(defaultServer.id, 'Jogos & Transmissão', 'voice', 'Sala para jogar e compartilhar tela', 4);
-
-        // Criar mensagem inicial de boas-vindas
-        const textChannel = db.prepare("SELECT id FROM channels WHERE server_id = ? AND name = 'geral'").get(defaultServer.id);
-        if (textChannel) {
-            const insertMsg = db.prepare(`
-                INSERT INTO messages (channel_id, sender_id, content)
-                VALUES (?, ?, ?)
-            `);
-            insertMsg.run(
-                textChannel.id,
-                adminUser.id,
-                'Bem-vindo ao nosso aplicativo de conversa e grupos! Sinta-se à vontade para convidar amigos, mandar mensagens, fotos, abrir webcam e compartilhar sua tela! 🚀✨'
-            );
-        }
-
         // Registrar log de auditoria
         const insertLog = db.prepare(`
             INSERT INTO audit_logs (admin_id, action, target_type, details)
             VALUES (?, ?, ?, ?)
         `);
         insertLog.run(adminUser.id, 'INIT_DATABASE', 'SYSTEM', 'Banco de dados inicializado com sucesso.');
-        console.log('[DB] Dados iniciais (admin, amigo demo, servidor e canais) criados com sucesso!');
+        console.log('[DB] Dados iniciais criados com sucesso!');
     }
 
     ensureCeoAccount(db);
-    ensureDefaultGeneralGroup(db);
+    removeDefaultGeneralGroup(db);
     ensureBugReportsTable(db);
 
     db.close();
@@ -160,72 +114,19 @@ function ensureCeoAccount(db) {
                 db.prepare("UPDATE users SET role = 'ceo', is_banned = 0 WHERE id = ?").run(ceoId);
             }
         }
-
-        // Garante que o CEO também esteja no servidor padrão se existir
-        const defaultServer = db.prepare("SELECT id FROM servers WHERE invite_code = 'GERAL2026'").get();
-        if (defaultServer && ceoId) {
-            const isMember = db.prepare('SELECT id FROM server_members WHERE server_id = ? AND user_id = ?').get(defaultServer.id, ceoId);
-            if (!isMember) {
-                db.prepare("INSERT INTO server_members (server_id, user_id, role) VALUES (?, ?, 'owner')").run(defaultServer.id, ceoId);
-            }
-        }
     } catch (err) {
         console.error('[DB] Erro ao garantir conta CEO:', err);
     }
 }
 
-function ensureDefaultGeneralGroup(db) {
+function removeDefaultGeneralGroup(db) {
     try {
-        let generalServer = db.prepare("SELECT id, name FROM servers WHERE invite_code = 'GERAL2026' LIMIT 1").get();
-
-        // Define o proprietário (prioriza CEO, senão primeiro admin, senão primeiro usuário)
-        const owner = db.prepare("SELECT id FROM users WHERE role = 'ceo' LIMIT 1").get()
-            || db.prepare("SELECT id FROM users WHERE role = 'admin' LIMIT 1").get()
-            || db.prepare("SELECT id FROM users ORDER BY id ASC LIMIT 1").get();
-
-        if (!owner) return;
-
-        if (!generalServer) {
-            const created = db.prepare(`
-                INSERT INTO servers (name, description, owner_id, invite_code)
-                VALUES (?, ?, ?, 'GERAL2026')
-            `).run(
-                'Grupo Geral',
-                'Grupo geral oficial do MiCord onde todo mundo pode entrar, conversar e entrar em call!',
-                owner.id
-            );
-            generalServer = { id: created.lastInsertRowid };
-
-            // Cria canais padrão de texto e voz
-            const insertChannel = db.prepare(`
-                INSERT INTO channels (server_id, name, type, topic, position)
-                VALUES (?, ?, ?, ?, ?)
-            `);
-            insertChannel.run(generalServer.id, 'geral', 'text', 'Bate-papo geral da galera', 1);
-            insertChannel.run(generalServer.id, 'fotos-e-memes', 'text', 'Envio de imagens, prints e memes', 2);
-            insertChannel.run(generalServer.id, 'Bate-papo Voz', 'voice', 'Sala de voz livre', 3);
-            insertChannel.run(generalServer.id, 'Jogos & Transmissão', 'voice', 'Sala para jogar e compartilhar tela', 4);
-
-            const textChannel = db.prepare("SELECT id FROM channels WHERE server_id = ? AND name = 'geral'").get(generalServer.id);
-            if (textChannel) {
-                db.prepare('INSERT INTO messages (channel_id, sender_id, content) VALUES (?, ?, ?)').run(
-                    textChannel.id,
-                    owner.id,
-                    'Bem-vindo ao Grupo Geral do MiCord! Todos os usuários já começam aqui — fiquem à vontade para conversar e entrar nas salas de voz! 🚀✨'
-                );
-            }
-            console.log('[DB] Grupo Geral (GERAL2026) criado com sucesso!');
-        }
-
-        // Garante que todos os usuários ativos estejam no Grupo Geral
-        const allUsers = db.prepare('SELECT id, role FROM users WHERE is_banned = 0').all();
-        const insertMember = db.prepare('INSERT OR IGNORE INTO server_members (server_id, user_id, role) VALUES (?, ?, ?)');
-        for (const u of allUsers) {
-            const memberRole = u.role === 'ceo' ? 'owner' : (u.role === 'admin' ? 'admin' : 'member');
-            insertMember.run(generalServer.id, u.id, memberRole);
+        const res = db.prepare("DELETE FROM servers WHERE invite_code = 'GERAL2026'").run();
+        if (res.changes > 0) {
+            console.log('[DB] Grupo Geral padrão (GERAL2026) excluído com sucesso.');
         }
     } catch (err) {
-        console.error('[DB] Erro ao garantir Grupo Geral:', err);
+        console.error('[DB] Erro ao remover Grupo Geral padrão:', err);
     }
 }
 
@@ -251,4 +152,4 @@ if (require.main === module) {
     initDatabase();
 }
 
-module.exports = { initDatabase, ensureCeoAccount, ensureDefaultGeneralGroup, ensureBugReportsTable, dbPath };
+module.exports = { initDatabase, ensureCeoAccount, removeDefaultGeneralGroup, ensureBugReportsTable, dbPath };
