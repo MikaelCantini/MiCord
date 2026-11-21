@@ -1489,3 +1489,61 @@ body {
     flex-direction: column;
     gap: 8px;
 }
+
+
+/* ===================================================================
+   BOTÃO FLUTUANTE DE REPORTAR BUG & BOTÃO SAIR DO GRUPO
+   =================================================================== */
+.floating-bug-btn {
+    position: fixed;
+    right: 20px;
+    bottom: 20px;
+    width: 46px;
+    height: 46px;
+    border-radius: var(--radius-full);
+    background: var(--bg-card);
+    border: 2px solid var(--accent-pink);
+    box-shadow: var(--shadow-lg);
+    font-size: 1.3rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    z-index: 900;
+    transition: transform 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+}
+
+.floating-bug-btn:hover {
+    transform: translateY(-3px) scale(1.06);
+    background: var(--accent-pink-soft);
+    box-shadow: 0 8px 24px rgba(255, 107, 157, 0.35);
+}
+
+.server-footer-actions {
+    margin-top: auto;
+    padding-top: 14px;
+    border-top: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.btn-leave-group {
+    width: 100%;
+    padding: 8px 12px;
+    border-radius: var(--radius-sm);
+    border: 1px solid rgba(231, 76, 60, 0.35);
+    background: rgba(231, 76, 60, 0.08);
+    color: #e74c3c;
+    font-family: inherit;
+    font-size: 0.82rem;
+    font-weight: 700;
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.btn-leave-group:hover {
+    background: #e74c3c;
+    color: #ffffff;
+}

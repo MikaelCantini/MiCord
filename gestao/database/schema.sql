@@ -100,6 +100,17 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     FOREIGN KEY (admin_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
+-- 8. Relatórios de Bugs enviados pelos usuários
+CREATE TABLE IF NOT EXISTS bug_reports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL,
+    status TEXT DEFAULT 'open', -- 'open', 'resolved'
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
 -- Índices para alta performance
 CREATE INDEX IF NOT EXISTS idx_messages_channel ON messages(channel_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_messages_dm ON messages(sender_id, recipient_id, created_at);

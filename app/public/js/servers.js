@@ -66,6 +66,10 @@ const ServersManager = {
             await this.joinServer('GERAL2026');
         });
 
+        // Botões de Sair / Excluir Grupo
+        document.getElementById('btn-leave-server')?.addEventListener('click', () => this.leaveCurrentServer());
+        document.getElementById('btn-delete-server')?.addEventListener('click', () => this.deleteCurrentServer());
+
         // Botões de criar canais
         document.getElementById('btn-create-text-channel')?.addEventListener('click', () => {
             this.openCreateChannelModal('text');
@@ -167,6 +171,14 @@ const ServersManager = {
             // Renderiza membros do servidor na coluna da direita
             this.renderMembers(serverData.members);
 
+            // Atualiza visibilidade dos botões Sair / Excluir Grupo
+            const myId = window.AuthManager?.user?.id;
+            const isOwner = myId && serverData.owner_id === myId;
+            const leaveBtn = document.getElementById('btn-leave-server');
+            const deleteBtn = document.getElementById('btn-delete-server');
+            if (leaveBtn) leaveBtn.style.display = isOwner ? 'none' : 'block';
+            if (deleteBtn) deleteBtn.style.display = (isOwner && serverData.invite_code !== 'GERAL2026') ? 'block' : 'none';
+
             // Seleciona o primeiro canal de texto por padrão
             const firstText = serverData.channels.find(c => c.type === 'text');
             if (firstText) {
@@ -174,6 +186,68 @@ const ServersManager = {
             }
         } catch (err) {
             console.error('Erro ao selecionar servidor:', err);
+        }
+    },
+
+    async leaveCurrentServer() {
+        if (!this.currentServer) return;
+        const server = this.currentServer;
+        if (!confirm(`Tem certeza que deseja sair do grupo "${server.name}"?`)) return;
+
+        const token = window.AuthManager ? window.AuthManager.token : null;
+        try {
+            const res = await fetch(`/api/servers/${server.id}/leave`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            const data = await res.json();
+            if (res.ok) {
+                this.currentServer = null;
+                this.currentChannel = null;
+                if (window.WebRTCManager && window.WebRTCManager.currentChannelId) {
+                    window.WebRTCManager.leaveRoom();
+                }
+                await this.loadServers();
+                if (window.App) {
+                    window.App.showHomeView();
+                    window.App.showToast(data.message || `Você saiu de "${server.name}".`);
+                }
+            } else {
+                alert(data.error || 'Não foi possível sair do grupo.');
+            }
+        } catch (err) {
+            alert('Erro de conexão ao tentar sair do grupo.');
+        }
+    },
+
+    async deleteCurrentServer() {
+        if (!this.currentServer) return;
+        const server = this.currentServer;
+        if (!confirm(`Deseja EXCLUIR PERMANENTEMENTE o grupo "${server.name}" e todos os seus canais e mensagens?`)) return;
+
+        const token = window.AuthManager ? window.AuthManager.token : null;
+        try {
+            const res = await fetch(`/api/servers/${server.id}`, {
+                method: 'DELETE',
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            const data = await res.json();
+            if (res.ok) {
+                this.currentServer = null;
+                this.currentChannel = null;
+                if (window.WebRTCManager && window.WebRTCManager.currentChannelId) {
+                    window.WebRTCManager.leaveRoom();
+                }
+                await this.loadServers();
+                if (window.App) {
+                    window.App.showHomeView();
+                    window.App.showToast(data.message || `Grupo "${server.name}" excluído.`);
+                }
+            } else {
+                alert(data.error || 'Não foi possível excluir o grupo.');
+            }
+        } catch (err) {
+            alert('Erro de conexão ao tentar excluir o grupo.');
         }
     },
 

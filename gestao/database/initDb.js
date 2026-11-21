@@ -127,6 +127,7 @@ function initDatabase() {
 
     ensureCeoAccount(db);
     ensureDefaultGeneralGroup(db);
+    ensureBugReportsTable(db);
 
     db.close();
     console.log('[DB] Banco de dados pronto para uso.');
@@ -228,8 +229,26 @@ function ensureDefaultGeneralGroup(db) {
     }
 }
 
+function ensureBugReportsTable(db) {
+    try {
+        db.exec(`
+            CREATE TABLE IF NOT EXISTS bug_reports (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                title TEXT NOT NULL,
+                description TEXT NOT NULL,
+                status TEXT DEFAULT 'open',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+            );
+        `);
+    } catch (err) {
+        console.error('[DB] Erro ao garantir tabela bug_reports:', err);
+    }
+}
+
 if (require.main === module) {
     initDatabase();
 }
 
-module.exports = { initDatabase, ensureCeoAccount, ensureDefaultGeneralGroup, dbPath };
+module.exports = { initDatabase, ensureCeoAccount, ensureDefaultGeneralGroup, ensureBugReportsTable, dbPath };

@@ -189,6 +189,7 @@ const AdminApp = {
             users: { title: 'Controle de Usuários', desc: 'Gerenciamento, papéis, suspensões e permissões' },
             servers: { title: 'Servidores & Grupos', desc: 'Grupos criados, canais e moderação de conteúdo' },
             logs: { title: 'Logs de Auditoria', desc: 'Histórico de ações e eventos do sistema' },
+            bugs: { title: 'Bugs Reportados', desc: 'Relatórios de problemas enviados pelos usuários do app' },
             database: { title: 'Banco de Dados', desc: 'Manutenção, backups e integridade do SQLite' }
         };
 
@@ -205,6 +206,7 @@ const AdminApp = {
         else if (this.currentTab === 'users') this.loadUsers();
         else if (this.currentTab === 'servers') this.loadServers();
         else if (this.currentTab === 'logs') this.loadLogs();
+        else if (this.currentTab === 'bugs') this.loadBugs();
     },
 
     // 1. Visão Geral
@@ -623,6 +625,78 @@ const AdminApp = {
         } catch (e) {
             feedback.className = 'alert-box error';
             feedback.textContent = 'Erro ao conectar ao servidor.';
+        }
+    },
+
+    // Bugs Reportados
+    async loadBugs() {
+        try {
+            const res = await fetch('/api/admin/bugs', {
+                headers: { 'Authorization': `Bearer ${this.token}` }
+            });
+            if (!res.ok) return;
+            const bugs = await res.json();
+            const tbody = document.getElementById('table-bugs-list');
+            tbody.innerHTML = '';
+
+            if (bugs.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding: 24px; color: var(--text-muted);">Nenhum bug reportado até o momento. 🎉</td></tr>';
+                return;
+            }
+
+            bugs.forEach(b => {
+                const tr = document.createElement('tr');
+                const isResolved = b.status === 'resolved';
+                const safeTitle = (b.title || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                const safeDesc = (b.description || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                tr.innerHTML = `
+                    <td>#${b.id}</td>
+                    <td><strong>${b.display_name || b.username || 'Usuário'}</strong><br><small>@${b.username || '-'}</small></td>
+                    <td><strong>${safeTitle}</strong></td>
+                    <td style="max-width: 320px; white-space: pre-wrap;">${safeDesc}</td>
+                    <td><span class="badge-status ${isResolved ? 'active' : 'banned'}">${isResolved ? 'Resolvido' : 'Aberto'}</span></td>
+                    <td>${new Date(b.created_at).toLocaleString()}</td>
+                    <td>
+                        <button class="btn btn-sm btn-secondary" onclick="AdminApp.toggleBugStatus(${b.id})">${isResolved ? 'Reabrir' : '✓ Resolver'}</button>
+                        <button class="btn btn-sm btn-icon" title="Excluir" onclick="AdminApp.deleteBug(${b.id})">🗑️</button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+        } catch (e) {
+            console.error('Erro ao carregar bugs:', e);
+        }
+    },
+
+    async toggleBugStatus(bugId) {
+        try {
+            const res = await fetch(`/api/admin/bugs/${bugId}/status`, {
+                method: 'PUT',
+                headers: { 'Authorization': `Bearer ${this.token}` }
+            });
+            const data = await res.json();
+            if (res.ok) {
+                this.loadBugs();
+                this.showToast(data.message);
+            }
+        } catch (e) {
+            alert('Erro ao atualizar bug.');
+        }
+    },
+
+    async deleteBug(bugId) {
+        if (!confirm('Deseja excluir este relatório de bug?')) return;
+        try {
+            const res = await fetch(`/api/admin/bugs/${bugId}`, {
+                method: 'DELETE',
+                headers: { 'Authorization': `Bearer ${this.token}` }
+            });
+            if (res.ok) {
+                this.loadBugs();
+                this.showToast('Relatório de bug excluído.');
+            }
+        } catch (e) {
+            alert('Erro ao excluir bug.');
         }
     },
 

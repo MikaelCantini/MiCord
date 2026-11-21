@@ -194,7 +194,7 @@ router.delete('/:id', authMiddleware, (req, res) => {
             return res.status(404).json({ error: 'Servidor não encontrado.' });
         }
 
-        if (server.owner_id !== userId && req.user.role !== 'admin') {
+        if (server.owner_id !== userId && !['admin', 'ceo'].includes(req.user.role)) {
             return res.status(403).json({ error: 'Apenas o proprietário pode excluir este servidor.' });
         }
 

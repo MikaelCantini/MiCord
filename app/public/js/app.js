@@ -45,10 +45,54 @@ const App = {
                 window.WebRTCManager.startDirectCall(window.ChatManager.currentDMUserId, true);
             }
         });
+
+        // Botão flutuante e modal de Reportar Bug
+        document.getElementById('btn-report-bug')?.addEventListener('click', () => {
+            document.getElementById('bug-title-input').value = '';
+            document.getElementById('bug-desc-input').value = '';
+            document.getElementById('modal-bug-report').style.display = 'flex';
+        });
+
+        document.getElementById('form-bug-report')?.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            await this.submitBugReport();
+        });
+    },
+
+    async submitBugReport() {
+        const token = window.AuthManager ? window.AuthManager.token : null;
+        if (!token) return;
+
+        const title = document.getElementById('bug-title-input').value.trim();
+        const description = document.getElementById('bug-desc-input').value.trim();
+        if (!title || !description) return;
+
+        try {
+            const res = await fetch('/api/bugs', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({ title, description })
+            });
+
+            const data = await res.json();
+            if (res.ok) {
+                document.getElementById('modal-bug-report').style.display = 'none';
+                this.showToast('🐛 Bug reportado com sucesso! Obrigado pelo aviso.');
+            } else {
+                this.showToast(data.error || 'Erro ao enviar relatório de bug.');
+            }
+        } catch (err) {
+            this.showToast('Erro de conexão ao reportar bug.');
+        }
     },
 
     async onAuthenticated(user, token, options = {}) {
         console.log(`[App] Usuário autenticado: ${user.username}`);
+        const bugBtn = document.getElementById('btn-report-bug');
+        if (bugBtn) bugBtn.style.display = 'flex';
         
         // Conecta ao Socket.io
         this.connectSocket(token);

@@ -8,6 +8,7 @@ const adminStatsRoutes = require('./src/routes/adminStats');
 const adminUsersRoutes = require('./src/routes/adminUsers');
 const adminServersRoutes = require('./src/routes/adminServers');
 const adminLogsRoutes = require('./src/routes/adminLogs');
+const adminBugsRoutes = require('./src/routes/adminBugs');
 
 const app = express();
 
@@ -24,6 +25,7 @@ app.use('/api/admin/stats', adminStatsRoutes);
 app.use('/api/admin/users', adminUsersRoutes);
 app.use('/api/admin/servers', adminServersRoutes);
 app.use('/api/admin/logs', adminLogsRoutes);
+app.use('/api/admin/bugs', adminBugsRoutes);
 
 // Fallback SPA
 app.get('*', (req, res) => {

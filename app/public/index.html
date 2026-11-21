@@ -165,6 +165,11 @@
                             <!-- Salas de voz e lista de pessoas dentro delas -->
                         </div>
                     </div>
+
+                    <div class="server-footer-actions">
+                        <button type="button" class="btn-leave-group" id="btn-leave-server" style="display: none;">🚪 Sair do Grupo</button>
+                        <button type="button" class="btn-leave-group" id="btn-delete-server" style="display: none;">🗑️ Excluir Grupo</button>
+                    </div>
                 </div>
 
                 <!-- BARRA DE STATUS INFERIOR DO USUÁRIO CONECTADO -->
@@ -523,6 +528,30 @@
                 <button class="btn btn-danger" id="btn-decline-call">Recusar ✕</button>
             </div>
         </div>
+
+        <!-- Modal: Reportar Bug -->
+        <div id="modal-bug-report" class="modal-overlay" style="display: none;">
+            <div class="modal-card">
+                <div class="modal-header">
+                    <h3>🐛 Reportar um Bug</h3>
+                    <button class="modal-close" data-close="modal-bug-report">✕</button>
+                </div>
+                <form id="form-bug-report" class="modal-body">
+                    <div class="form-group">
+                        <label for="bug-title-input">Onde aconteceu o problema?</label>
+                        <input type="text" id="bug-title-input" placeholder="ex: Áudio na sala de voz, Chat, Tela cheia..." maxlength="120" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="bug-desc-input">Descreva o bug</label>
+                        <textarea id="bug-desc-input" rows="4" placeholder="Conte o que aconteceu e como reproduzir o erro..." maxlength="2000" required></textarea>
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-block">Enviar Relatório 🐛</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Botão Flutuante: Reportar Bug (Canto inferior direito) -->
+        <button type="button" id="btn-report-bug" class="floating-bug-btn" title="Reportar Bug" style="display: none;">🐛</button>
 
         <!-- Toast de Notificação -->
         <div id="toast-container" class="toast-container"></div>

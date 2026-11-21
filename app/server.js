@@ -14,6 +14,7 @@ const serversRoutes = require('./src/routes/servers');
 const channelsRoutes = require('./src/routes/channels');
 const messagesRoutes = require('./src/routes/messages');
 const uploadRoutes = require('./src/routes/upload');
+const bugsRoutes = require('./src/routes/bugs');
 
 const app = express();
 const server = http.createServer(app);
@@ -57,6 +58,7 @@ app.use('/api/servers', serversRoutes);
 app.use('/api/channels', channelsRoutes);
 app.use('/api/messages', messagesRoutes);
 app.use('/api/upload', uploadRoutes);
+app.use('/api/bugs', bugsRoutes);
 
 // Fallback SPA
 app.get('*', (req, res) => {

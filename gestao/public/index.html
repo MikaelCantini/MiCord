@@ -61,6 +61,9 @@
                     <button class="nav-btn" data-tab="logs">
                         <span class="icon">📜</span> Logs de Auditoria
                     </button>
+                    <button class="nav-btn" data-tab="bugs">
+                        <span class="icon">🐛</span> Bugs Reportados
+                    </button>
                     <button class="nav-btn" data-tab="database">
                         <span class="icon">💾</span> Banco de Dados
                     </button>
@@ -284,6 +287,33 @@
                                         </tr>
                                     </thead>
                                     <tbody id="table-logs-list">
+                                        <!-- Inserido dinamicamente -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- ABA 4B: BUGS REPORTADOS -->
+                    <section id="tab-bugs" class="tab-pane">
+                        <div class="panel-card">
+                            <div class="card-header">
+                                <h3>🐛 Bugs Reportados pelos Usuários</h3>
+                            </div>
+                            <div class="table-scroller">
+                                <table class="admin-table">
+                                    <thead>
+                                        <tr>
+                                            <th>ID</th>
+                                            <th>Usuário</th>
+                                            <th>Onde / Título</th>
+                                            <th>Descrição</th>
+                                            <th>Status</th>
+                                            <th>Data</th>
+                                            <th>Ações</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="table-bugs-list">
                                         <!-- Inserido dinamicamente -->
                                     </tbody>
                                 </table>
