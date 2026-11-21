@@ -19,11 +19,13 @@ const WebRTCManager = {
     isVideoOn: false,
     isScreenSharing: false,
     isNoiseSuppressionOn: true,
+    isMicTestOn: false,
     
-    // Nós Web Audio API para supressão de ruído e noise gate em tempo real
+    // Nós Web Audio API para supressão de ruído, noise gate e retorno de voz (teste)
     highpassFilter: null,
     lowpassFilter: null,
     noiseGateGain: null,
+    micTestGain: null,
     lastSpeechTime: 0,
     
     // WebRTC PeerConnections Map<peerSocketId, RTCPeerConnection>
@@ -115,6 +117,7 @@ const WebRTCManager = {
         const micBtn = document.getElementById('btn-toggle-mic');
         const webrtcMicBtn = document.getElementById('webrtc-mic-btn');
         const noiseBtn = document.getElementById('webrtc-noise-btn');
+        const micTestBtn = document.getElementById('webrtc-mic-test-btn');
         const deafenBtn = document.getElementById('btn-toggle-deafen');
         const videoBtn = document.getElementById('webrtc-video-btn');
         const screenBtn = document.getElementById('webrtc-screen-btn');
@@ -123,6 +126,7 @@ const WebRTCManager = {
         micBtn?.addEventListener('click', () => this.toggleMute());
         webrtcMicBtn?.addEventListener('click', () => this.toggleMute());
         noiseBtn?.addEventListener('click', () => this.toggleNoiseSuppression());
+        micTestBtn?.addEventListener('click', () => this.toggleMicTest());
         deafenBtn?.addEventListener('click', () => this.toggleDeafen());
         videoBtn?.addEventListener('click', () => this.toggleVideo());
         screenBtn?.addEventListener('click', () => this.toggleScreenShare());
@@ -225,8 +229,15 @@ const WebRTCManager = {
                     await this.flushPendingCandidates(fromSocketId, pc);
 
                     const answer = await pc.createAnswer();
-                    answer.sdp = this.enhanceSdpAudio(answer.sdp);
-                    await pc.setLocalDescription(answer);
+                    try {
+                        await pc.setLocalDescription({
+                            type: answer.type,
+                            sdp: this.enhanceSdpAudio(answer.sdp)
+                        });
+                    } catch (sdpErr) {
+                        console.warn('[WebRTC] Fallback para SDP padrão na resposta:', sdpErr);
+                        await pc.setLocalDescription(answer);
+                    }
                     this.socket.emit('webrtc:signal', {
                         toSocketId: fromSocketId,
                         signal: pc.localDescription
@@ -427,6 +438,33 @@ const WebRTCManager = {
                 this.isNoiseSuppressionOn
                     ? '✨ Supressor de ruído ativado!'
                     : 'Supressor de ruído desativado.'
+            );
+        }
+    },
+
+    // Ativa / Desativa retorno da própria voz para testar o microfone e o supressor de ruído
+    toggleMicTest() {
+        this.isMicTestOn = !this.isMicTestOn;
+
+        if (this.audioContext && this.audioContext.state === 'suspended') {
+            this.audioContext.resume().catch(() => {});
+        }
+
+        if (this.micTestGain && this.audioContext) {
+            const now = this.audioContext.currentTime;
+            this.micTestGain.gain.setTargetAtTime(this.isMicTestOn ? 1.0 : 0.0, now, 0.02);
+        }
+
+        const btn = document.getElementById('webrtc-mic-test-btn');
+        if (btn) {
+            btn.classList.toggle('active', this.isMicTestOn);
+        }
+
+        if (window.App) {
+            window.App.showToast(
+                this.isMicTestOn
+                    ? '👂 Teste de voz ATIVO — fale para ouvir seu microfone (alterne o Supressor para comparar).'
+                    : 'Teste de voz desativado.'
             );
         }
     },
@@ -645,8 +683,15 @@ const WebRTCManager = {
         try {
             this.makingOffer.set(targetSocketId, true);
             const offer = await pc.createOffer();
-            offer.sdp = this.enhanceSdpAudio(offer.sdp);
-            await pc.setLocalDescription(offer);
+            try {
+                await pc.setLocalDescription({
+                    type: offer.type,
+                    sdp: this.enhanceSdpAudio(offer.sdp)
+                });
+            } catch (sdpErr) {
+                console.warn('[WebRTC] Fallback para SDP padrão na oferta:', sdpErr);
+                await pc.setLocalDescription(offer);
+            }
             this.socket.emit('webrtc:signal', {
                 toSocketId: targetSocketId,
                 signal: pc.localDescription
@@ -658,7 +703,7 @@ const WebRTCManager = {
         }
     },
 
-    // Melhora qualidade do codec Opus no SDP (Estéreo + 192 kbps + 48 kHz + FEC) para transmissões de tela cristalinas
+    // Melhora qualidade do codec Opus no SDP (Estéreo + 192 kbps + 48 kHz + FEC) sem duplicar parâmetros
     enhanceSdpAudio(sdp) {
         if (!sdp) return sdp;
         try {
@@ -676,16 +721,38 @@ const WebRTCManager = {
             if (!opusPayloadType) return sdp;
 
             const fmtpPrefix = `a=fmtp:${opusPayloadType} `;
-            const hqParams = 'stereo=1;sprop-stereo=1;maxaveragebitrate=192000;maxplaybackrate=48000;useinbandfec=1;usedtx=0';
-            let foundFmtp = false;
+            const desiredParams = {
+                stereo: '1',
+                'sprop-stereo': '1',
+                maxaveragebitrate: '192000',
+                maxplaybackrate: '48000',
+                useinbandfec: '1',
+                usedtx: '0'
+            };
 
+            let foundFmtp = false;
             const updatedLines = lines.map(line => {
                 if (line.startsWith(fmtpPrefix)) {
                     foundFmtp = true;
-                    // Remove parâmetros antigos conflitantes e aplica os de alta qualidade
-                    const cleaned = line
-                        .replace(/;?\s*(stereo|sprop-stereo|maxaveragebitrate|maxplaybackrate|usedtx)=[^;\s]+/gi, '');
-                    return `${cleaned};${hqParams}`;
+                    const existingPart = line.slice(fmtpPrefix.length).trim();
+                    const paramMap = new Map();
+
+                    if (existingPart) {
+                        existingPart.split(';').forEach(pair => {
+                            const trimmed = pair.trim();
+                            if (!trimmed) return;
+                            const eqIdx = trimmed.indexOf('=');
+                            if (eqIdx > 0) {
+                                const k = trimmed.slice(0, eqIdx).trim().toLowerCase();
+                                const v = trimmed.slice(eqIdx + 1).trim();
+                                paramMap.set(k, v);
+                            }
+                        });
+                    }
+
+                    Object.entries(desiredParams).forEach(([k, v]) => paramMap.set(k, v));
+                    const serialized = Array.from(paramMap.entries()).map(([k, v]) => `${k}=${v}`).join(';');
+                    return `${fmtpPrefix}${serialized}`;
                 }
                 return line;
             });
@@ -693,7 +760,8 @@ const WebRTCManager = {
             if (!foundFmtp) {
                 const rtpmapIndex = updatedLines.findIndex(l => l.startsWith(`a=rtpmap:${opusPayloadType} `));
                 if (rtpmapIndex !== -1) {
-                    updatedLines.splice(rtpmapIndex + 1, 0, `${fmtpPrefix}${hqParams}`);
+                    const serialized = Object.entries(desiredParams).map(([k, v]) => `${k}=${v}`).join(';');
+                    updatedLines.splice(rtpmapIndex + 1, 0, `${fmtpPrefix}${serialized}`);
                 }
             }
 
@@ -738,6 +806,10 @@ const WebRTCManager = {
             this.noiseGateGain = this.audioContext.createGain();
             this.noiseGateGain.gain.value = 1.0;
 
+            // 5. Retorno de voz para teste do supressor de ruído (desligado por padrão)
+            this.micTestGain = this.audioContext.createGain();
+            this.micTestGain.gain.value = this.isMicTestOn ? 1.0 : 0.0;
+
             // Analyser para detecção de fala e controle do Noise Gate
             this.analyser = this.audioContext.createAnalyser();
             this.analyser.fftSize = 512;
@@ -751,6 +823,8 @@ const WebRTCManager = {
             this.lowpassFilter.connect(compressor);
             compressor.connect(this.noiseGateGain);
             this.noiseGateGain.connect(destination);
+            this.noiseGateGain.connect(this.micTestGain);
+            this.micTestGain.connect(this.audioContext.destination);
 
             const timeData = new Float32Array(this.analyser.fftSize);
             const freqBuffer = new Uint8Array(this.analyser.frequencyBinCount);
@@ -966,22 +1040,15 @@ const WebRTCManager = {
 
     async attachTracksToAllPeers(stream) {
         const modifiedPeers = new Set();
+        const screenAudioSenders = [];
         stream.getTracks().forEach(track => {
             this.peerConnections.forEach((pc, socketId) => {
                 const senders = pc.getSenders();
                 const exists = senders.some(s => s.track && s.track.id === track.id);
                 if (!exists) {
                     const sender = pc.addTrack(track, stream);
-                    // Aumenta bitrate do áudio da transmissão de tela para 192 kbps
-                    if (stream === this.localScreenStream && track.kind === 'audio' && sender && sender.getParameters) {
-                        try {
-                            const params = sender.getParameters();
-                            if (!params.encodings || params.encodings.length === 0) {
-                                params.encodings = [{}];
-                            }
-                            params.encodings[0].maxBitrate = 192000;
-                            sender.setParameters(params).catch(() => {});
-                        } catch (e) {}
+                    if (stream === this.localScreenStream && track.kind === 'audio' && sender) {
+                        screenAudioSenders.push(sender);
                     }
                     modifiedPeers.add(socketId);
                 }
@@ -990,6 +1057,19 @@ const WebRTCManager = {
 
         for (const socketId of modifiedPeers) {
             await this.renegotiatePeer(socketId);
+        }
+
+        // Aplica bitrate de 192 kbps no áudio da transmissão após a renegociação
+        for (const sender of screenAudioSenders) {
+            if (sender && sender.getParameters) {
+                try {
+                    const params = sender.getParameters();
+                    if (params.encodings && params.encodings.length > 0) {
+                        params.encodings[0].maxBitrate = 192000;
+                        await sender.setParameters(params).catch(() => {});
+                    }
+                } catch (e) {}
+            }
         }
     },
 
@@ -1450,7 +1530,16 @@ const WebRTCManager = {
         }
 
         if (this.speechInterval) clearInterval(this.speechInterval);
-        if (this.audioContext) this.audioContext.close();
+        if (this.audioContext) {
+            this.audioContext.close().catch(() => {});
+            this.audioContext = null;
+        }
+        this.highpassFilter = null;
+        this.lowpassFilter = null;
+        this.noiseGateGain = null;
+        this.micTestGain = null;
+        this.isMicTestOn = false;
+        document.getElementById('webrtc-mic-test-btn')?.classList.remove('active');
 
         this.peerConnections.forEach(pc => pc.close());
         this.peerConnections.clear();
