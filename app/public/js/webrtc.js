@@ -8,6 +8,7 @@ const WebRTCManager = {
     isDirectCall: false,
     
     // Streams locais
+    rawMicStream: null,
     localAudioStream: null,
     localVideoStream: null,
     localScreenStream: null,
@@ -17,6 +18,13 @@ const WebRTCManager = {
     isDeafened: false,
     isVideoOn: false,
     isScreenSharing: false,
+    isNoiseSuppressionOn: true,
+    
+    // Nós Web Audio API para supressão de ruído e noise gate em tempo real
+    highpassFilter: null,
+    lowpassFilter: null,
+    noiseGateGain: null,
+    lastSpeechTime: 0,
     
     // WebRTC PeerConnections Map<peerSocketId, RTCPeerConnection>
     peerConnections: new Map(),
@@ -54,6 +62,9 @@ const WebRTCManager = {
     init(socket) {
         this.socket = socket;
         this.loadSavedVolumes();
+        const savedNs = localStorage.getItem('micord_noise_suppression');
+        this.isNoiseSuppressionOn = savedNs === null ? true : savedNs === 'true';
+        this.updateNoiseBtnUI();
         this.bindSocketEvents();
         this.bindUIEvents();
     },
@@ -103,6 +114,7 @@ const WebRTCManager = {
         // Botões da barra inferior e barra WebRTC
         const micBtn = document.getElementById('btn-toggle-mic');
         const webrtcMicBtn = document.getElementById('webrtc-mic-btn');
+        const noiseBtn = document.getElementById('webrtc-noise-btn');
         const deafenBtn = document.getElementById('btn-toggle-deafen');
         const videoBtn = document.getElementById('webrtc-video-btn');
         const screenBtn = document.getElementById('webrtc-screen-btn');
@@ -110,6 +122,7 @@ const WebRTCManager = {
 
         micBtn?.addEventListener('click', () => this.toggleMute());
         webrtcMicBtn?.addEventListener('click', () => this.toggleMute());
+        noiseBtn?.addEventListener('click', () => this.toggleNoiseSuppression());
         deafenBtn?.addEventListener('click', () => this.toggleDeafen());
         videoBtn?.addEventListener('click', () => this.toggleVideo());
         screenBtn?.addEventListener('click', () => this.toggleScreenShare());
@@ -212,6 +225,7 @@ const WebRTCManager = {
                     await this.flushPendingCandidates(fromSocketId, pc);
 
                     const answer = await pc.createAnswer();
+                    answer.sdp = this.enhanceSdpAudio(answer.sdp);
                     await pc.setLocalDescription(answer);
                     this.socket.emit('webrtc:signal', {
                         toSocketId: fromSocketId,
@@ -328,21 +342,92 @@ const WebRTCManager = {
         });
     },
 
-    // Inicia captura de microfone e detecção de fala
+    // Inicia captura de microfone com Supressor de Ruído (DSP do navegador + filtros Web Audio API + Noise Gate)
     async startLocalAudio() {
         if (this.localAudioStream) return;
         try {
-            this.localAudioStream = await navigator.mediaDevices.getUserMedia({
-                audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+            this.rawMicStream = await navigator.mediaDevices.getUserMedia({
+                audio: {
+                    echoCancellation: true,
+                    noiseSuppression: this.isNoiseSuppressionOn,
+                    autoGainControl: true,
+                    channelCount: 1,
+                    sampleRate: 48000,
+                    googNoiseSuppression: this.isNoiseSuppressionOn,
+                    googHighpassFilter: this.isNoiseSuppressionOn,
+                    googTypingNoiseDetection: this.isNoiseSuppressionOn
+                },
                 video: false
             });
 
-            this.setupVoiceActivityDetection(this.localAudioStream);
+            // Cria pipeline de supressão de ruído + detecção de fala
+            const processedStream = this.setupNoiseSuppressionAndVAD(this.rawMicStream);
+            this.localAudioStream = processedStream || this.rawMicStream;
+
+            // Respeita estado de mudo atual
+            this.localAudioStream.getAudioTracks().forEach(t => { t.enabled = !this.isMuted; });
+
+            this.updateNoiseBtnUI();
             this.socket?.emit('voice:state-update', { micStreamId: this.localAudioStream.id });
             await this.attachTracksToAllPeers(this.localAudioStream);
         } catch (err) {
             console.warn('[WebRTC] Não foi possível acessar o microfone:', err);
             if (window.App) window.App.showToast('Aviso: microfone não encontrado ou permissão negada.');
+        }
+    },
+
+    updateNoiseBtnUI() {
+        const noiseBtn = document.getElementById('webrtc-noise-btn');
+        if (noiseBtn) {
+            noiseBtn.classList.toggle('active', this.isNoiseSuppressionOn);
+            noiseBtn.title = this.isNoiseSuppressionOn
+                ? 'Supressor de Ruído ATIVO (clique para desativar)'
+                : 'Supressor de Ruído DESATIVADO (clique para ativar)';
+        }
+    },
+
+    async toggleNoiseSuppression() {
+        this.isNoiseSuppressionOn = !this.isNoiseSuppressionOn;
+        try {
+            localStorage.setItem('micord_noise_suppression', String(this.isNoiseSuppressionOn));
+        } catch (e) {}
+
+        this.updateNoiseBtnUI();
+
+        // Atualiza constraints no microfone nativo
+        if (this.rawMicStream) {
+            const rawTrack = this.rawMicStream.getAudioTracks()[0];
+            if (rawTrack && rawTrack.applyConstraints) {
+                try {
+                    await rawTrack.applyConstraints({
+                        echoCancellation: true,
+                        noiseSuppression: this.isNoiseSuppressionOn,
+                        autoGainControl: true
+                    });
+                } catch (e) {}
+            }
+        }
+
+        // Atualiza filtros Web Audio API em tempo real sem derrubar a call
+        if (this.audioContext) {
+            const now = this.audioContext.currentTime;
+            if (this.highpassFilter) {
+                this.highpassFilter.frequency.setTargetAtTime(this.isNoiseSuppressionOn ? 85 : 10, now, 0.03);
+            }
+            if (this.lowpassFilter) {
+                this.lowpassFilter.frequency.setTargetAtTime(this.isNoiseSuppressionOn ? 14000 : 22000, now, 0.03);
+            }
+            if (this.noiseGateGain && !this.isNoiseSuppressionOn) {
+                this.noiseGateGain.gain.setTargetAtTime(1.0, now, 0.03);
+            }
+        }
+
+        if (window.App) {
+            window.App.showToast(
+                this.isNoiseSuppressionOn
+                    ? '✨ Supressor de ruído ativado!'
+                    : 'Supressor de ruído desativado.'
+            );
         }
     },
 
@@ -560,6 +645,7 @@ const WebRTCManager = {
         try {
             this.makingOffer.set(targetSocketId, true);
             const offer = await pc.createOffer();
+            offer.sdp = this.enhanceSdpAudio(offer.sdp);
             await pc.setLocalDescription(offer);
             this.socket.emit('webrtc:signal', {
                 toSocketId: targetSocketId,
@@ -572,41 +658,162 @@ const WebRTCManager = {
         }
     },
 
-    // Detecção de voz em tempo real usando Web Audio API
-    setupVoiceActivityDetection(stream) {
+    // Melhora qualidade do codec Opus no SDP (Estéreo + 192 kbps + 48 kHz + FEC) para transmissões de tela cristalinas
+    enhanceSdpAudio(sdp) {
+        if (!sdp) return sdp;
+        try {
+            const lines = sdp.split('\r\n');
+            let opusPayloadType = null;
+
+            for (const line of lines) {
+                const match = line.match(/^a=rtpmap:(\d+)\s+opus\/48000\/2/i);
+                if (match) {
+                    opusPayloadType = match[1];
+                    break;
+                }
+            }
+
+            if (!opusPayloadType) return sdp;
+
+            const fmtpPrefix = `a=fmtp:${opusPayloadType} `;
+            const hqParams = 'stereo=1;sprop-stereo=1;maxaveragebitrate=192000;maxplaybackrate=48000;useinbandfec=1;usedtx=0';
+            let foundFmtp = false;
+
+            const updatedLines = lines.map(line => {
+                if (line.startsWith(fmtpPrefix)) {
+                    foundFmtp = true;
+                    // Remove parâmetros antigos conflitantes e aplica os de alta qualidade
+                    const cleaned = line
+                        .replace(/;?\s*(stereo|sprop-stereo|maxaveragebitrate|maxplaybackrate|usedtx)=[^;\s]+/gi, '');
+                    return `${cleaned};${hqParams}`;
+                }
+                return line;
+            });
+
+            if (!foundFmtp) {
+                const rtpmapIndex = updatedLines.findIndex(l => l.startsWith(`a=rtpmap:${opusPayloadType} `));
+                if (rtpmapIndex !== -1) {
+                    updatedLines.splice(rtpmapIndex + 1, 0, `${fmtpPrefix}${hqParams}`);
+                }
+            }
+
+            return updatedLines.join('\r\n');
+        } catch (e) {
+            return sdp;
+        }
+    },
+
+    // Pipeline de Supressor de Ruído (High-Pass + Low-Pass + Compressor + Noise Gate) e detecção de fala
+    setupNoiseSuppressionAndVAD(rawStream) {
         try {
             const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-            this.audioContext = new AudioContextClass();
-            const source = this.audioContext.createMediaStreamSource(stream);
+            this.audioContext = new AudioContextClass({ sampleRate: 48000 });
+            if (this.audioContext.state === 'suspended') {
+                this.audioContext.resume().catch(() => {});
+            }
+
+            const source = this.audioContext.createMediaStreamSource(rawStream);
+
+            // 1. Filtro High-Pass (corta zumbido grave, ventilador, ar-condicionado e batidas na mesa)
+            this.highpassFilter = this.audioContext.createBiquadFilter();
+            this.highpassFilter.type = 'highpass';
+            this.highpassFilter.frequency.value = this.isNoiseSuppressionOn ? 85 : 10;
+            this.highpassFilter.Q.value = 0.7;
+
+            // 2. Filtro Low-Pass (corta chiado agudo / estática de microfone)
+            this.lowpassFilter = this.audioContext.createBiquadFilter();
+            this.lowpassFilter.type = 'lowpass';
+            this.lowpassFilter.frequency.value = this.isNoiseSuppressionOn ? 14000 : 22000;
+            this.lowpassFilter.Q.value = 0.7;
+
+            // 3. Compressor suave (equilibra volume da voz e evita estourar o áudio)
+            const compressor = this.audioContext.createDynamicsCompressor();
+            compressor.threshold.value = -24;
+            compressor.knee.value = 20;
+            compressor.ratio.value = 4;
+            compressor.attack.value = 0.005;
+            compressor.release.value = 0.15;
+
+            // 4. Noise Gate suave (silencia ruído de fundo quando você não está falando)
+            this.noiseGateGain = this.audioContext.createGain();
+            this.noiseGateGain.gain.value = 1.0;
+
+            // Analyser para detecção de fala e controle do Noise Gate
             this.analyser = this.audioContext.createAnalyser();
             this.analyser.fftSize = 512;
-            source.connect(this.analyser);
+            this.analyser.smoothingTimeConstant = 0.65;
 
-            const buffer = new Uint8Array(this.analyser.frequencyBinCount);
+            const destination = this.audioContext.createMediaStreamDestination();
 
+            source.connect(this.highpassFilter);
+            this.highpassFilter.connect(this.lowpassFilter);
+            this.lowpassFilter.connect(this.analyser);
+            this.lowpassFilter.connect(compressor);
+            compressor.connect(this.noiseGateGain);
+            this.noiseGateGain.connect(destination);
+
+            const timeData = new Float32Array(this.analyser.fftSize);
+            const freqBuffer = new Uint8Array(this.analyser.frequencyBinCount);
+
+            if (this.speechInterval) clearInterval(this.speechInterval);
             this.speechInterval = setInterval(() => {
-                if (this.isMuted) return;
-                this.analyser.getByteFrequencyData(buffer);
-                let sum = 0;
-                for (let i = 0; i < buffer.length; i++) {
-                    sum += buffer[i];
+                if (!this.analyser || !this.audioContext) return;
+
+                if (this.isMuted) {
+                    if (this.isSpeaking) {
+                        this.isSpeaking = false;
+                        this.socket?.emit('voice:speaking', { isSpeaking: false });
+                        document.getElementById('peer-tile-self')?.classList.remove('speaking');
+                    }
+                    return;
                 }
-                const average = sum / buffer.length;
-                const isSpeakingNow = average > 18; // Limiar de voz
+
+                // Calcula RMS (volume real) para o Noise Gate
+                this.analyser.getFloatTimeDomainData(timeData);
+                let rmsSum = 0;
+                for (let i = 0; i < timeData.length; i++) {
+                    rmsSum += timeData[i] * timeData[i];
+                }
+                const rms = Math.sqrt(rmsSum / timeData.length);
+                const nowMs = Date.now();
+                const nowCtx = this.audioContext.currentTime;
+
+                if (this.isNoiseSuppressionOn && this.noiseGateGain) {
+                    const gateOpenThreshold = 0.012; // Limiar de fala vs ruído de fundo
+                    if (rms > gateOpenThreshold) {
+                        this.lastSpeechTime = nowMs;
+                        // Ataque rápido (15ms) para não cortar o início das palavras
+                        this.noiseGateGain.gain.setTargetAtTime(1.0, nowCtx, 0.015);
+                    } else if (nowMs - this.lastSpeechTime > 350) {
+                        // Release suave após 350ms de silêncio
+                        this.noiseGateGain.gain.setTargetAtTime(0.02, nowCtx, 0.08);
+                    }
+                } else if (this.noiseGateGain) {
+                    this.noiseGateGain.gain.setTargetAtTime(1.0, nowCtx, 0.02);
+                }
+
+                // Indicador visual de fala (glow verde)
+                this.analyser.getByteFrequencyData(freqBuffer);
+                let sum = 0;
+                for (let i = 0; i < freqBuffer.length; i++) sum += freqBuffer[i];
+                const average = sum / freqBuffer.length;
+                const isSpeakingNow = average > 16 || rms > 0.018;
 
                 if (isSpeakingNow !== this.isSpeaking) {
                     this.isSpeaking = isSpeakingNow;
-                    this.socket.emit('voice:speaking', { isSpeaking: this.isSpeaking });
-                    
+                    this.socket?.emit('voice:speaking', { isSpeaking: this.isSpeaking });
+
                     const selfTile = document.getElementById('peer-tile-self');
                     if (selfTile) {
-                        if (this.isSpeaking) selfTile.classList.add('speaking');
-                        else selfTile.classList.remove('speaking');
+                        selfTile.classList.toggle('speaking', this.isSpeaking);
                     }
                 }
-            }, 100);
+            }, 40);
+
+            return destination.stream;
         } catch (e) {
-            console.warn('[WebRTC] Analyser de fala não suportado:', e);
+            console.warn('[WebRTC] Pipeline Web Audio não suportado, usando microfone padrão:', e);
+            return rawStream;
         }
     },
 
@@ -696,12 +903,30 @@ const WebRTCManager = {
             }
             this.isScreenSharing = false;
         } else {
-            // Iniciar compartilhamento de tela
+            // Iniciar compartilhamento de tela com ÁUDIO ESTÉREO DE ALTA QUALIDADE (sem filtros de voz que distorcem jogos/músicas)
             try {
-                this.localScreenStream = await navigator.mediaDevices.getDisplayMedia({
-                    video: { cursor: 'always' },
-                    audio: true
-                });
+                try {
+                    this.localScreenStream = await navigator.mediaDevices.getDisplayMedia({
+                        video: {
+                            cursor: 'always',
+                            frameRate: { ideal: 60, max: 60 }
+                        },
+                        audio: {
+                            echoCancellation: false,
+                            noiseSuppression: false,
+                            autoGainControl: false,
+                            channelCount: 2,
+                            sampleRate: 48000,
+                            sampleSize: 16
+                        }
+                    });
+                } catch (constraintErr) {
+                    // Fallback caso o navegador não aceite constraints avançadas de áudio
+                    this.localScreenStream = await navigator.mediaDevices.getDisplayMedia({
+                        video: { cursor: 'always' },
+                        audio: true
+                    });
+                }
 
                 // Caso o usuário clique em "Parar Compartilhamento" nativo do navegador
                 this.localScreenStream.getVideoTracks()[0].onended = () => {
@@ -746,7 +971,18 @@ const WebRTCManager = {
                 const senders = pc.getSenders();
                 const exists = senders.some(s => s.track && s.track.id === track.id);
                 if (!exists) {
-                    pc.addTrack(track, stream);
+                    const sender = pc.addTrack(track, stream);
+                    // Aumenta bitrate do áudio da transmissão de tela para 192 kbps
+                    if (stream === this.localScreenStream && track.kind === 'audio' && sender && sender.getParameters) {
+                        try {
+                            const params = sender.getParameters();
+                            if (!params.encodings || params.encodings.length === 0) {
+                                params.encodings = [{}];
+                            }
+                            params.encodings[0].maxBitrate = 192000;
+                            sender.setParameters(params).catch(() => {});
+                        } catch (e) {}
+                    }
                     modifiedPeers.add(socketId);
                 }
             });
@@ -1194,6 +1430,10 @@ const WebRTCManager = {
         }
 
         // Para streams e fecha conexões
+        if (this.rawMicStream) {
+            this.rawMicStream.getTracks().forEach(t => t.stop());
+            this.rawMicStream = null;
+        }
         if (this.localAudioStream) {
             this.localAudioStream.getTracks().forEach(t => t.stop());
             this.localAudioStream = null;
