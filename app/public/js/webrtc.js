@@ -243,7 +243,7 @@ const WebRTCManager = {
                     try {
                         await pc.setLocalDescription({
                             type: answer.type,
-                            sdp: this.enhanceSdpAudio(answer.sdp)
+                            sdp: this.enhanceSdpMedia(answer.sdp)
                         });
                     } catch (sdpErr) {
                         console.warn('[WebRTC] Fallback para SDP padrão na resposta:', sdpErr);
@@ -715,7 +715,7 @@ const WebRTCManager = {
             try {
                 await pc.setLocalDescription({
                     type: offer.type,
-                    sdp: this.enhanceSdpAudio(offer.sdp)
+                    sdp: this.enhanceSdpMedia(offer.sdp)
                 });
             } catch (sdpErr) {
                 console.warn('[WebRTC] Fallback para SDP padrão na oferta:', sdpErr);
@@ -729,6 +729,86 @@ const WebRTCManager = {
             console.error('[WebRTC] Erro ao renegociar conexão com peer:', err);
         } finally {
             this.makingOffer.set(targetSocketId, false);
+        }
+    },
+
+    // Aplica otimizações de Áudio (Opus Estéreo 192 kbps) e Vídeo (720p/1080p nítido 1.5–6 Mbps) no SDP
+    enhanceSdpMedia(sdp) {
+        return this.enhanceSdpVideo(this.enhanceSdpAudio(sdp));
+    },
+
+    // Força bitrate inicial (2.5 Mbps) e mínimo (1.5 Mbps) no vídeo para eliminar pixelização na transmissão
+    enhanceSdpVideo(sdp) {
+        if (!sdp) return sdp;
+        try {
+            const lines = sdp.split('\r\n');
+            const videoPayloadTypes = new Set();
+
+            for (const line of lines) {
+                const match = line.match(/^a=rtpmap:(\d+)\s+(VP8|VP9|H264|AV1)\/90000/i);
+                if (match) {
+                    videoPayloadTypes.add(match[1]);
+                }
+            }
+
+            if (videoPayloadTypes.size === 0) return sdp;
+
+            const videoBitrateParams = {
+                'x-google-min-bitrate': '1500',
+                'x-google-start-bitrate': '2500',
+                'x-google-max-bitrate': '6000'
+            };
+
+            const fmtpSeen = new Set();
+            const result = [];
+
+            for (let i = 0; i < lines.length; i++) {
+                let line = lines[i];
+
+                // Garante b=AS:6000 na seção de vídeo
+                if (line.startsWith('m=video ')) {
+                    result.push(line);
+                    continue;
+                }
+
+                const fmtpMatch = line.match(/^a=fmtp:(\d+)\s+(.*)$/);
+                if (fmtpMatch && videoPayloadTypes.has(fmtpMatch[1])) {
+                    const pt = fmtpMatch[1];
+                    fmtpSeen.add(pt);
+                    const paramMap = new Map();
+                    fmtpMatch[2].trim().split(';').forEach(pair => {
+                        const trimmed = pair.trim();
+                        if (!trimmed) return;
+                        const eqIdx = trimmed.indexOf('=');
+                        if (eqIdx > 0) {
+                            paramMap.set(trimmed.slice(0, eqIdx).trim(), trimmed.slice(eqIdx + 1).trim());
+                        }
+                    });
+                    Object.entries(videoBitrateParams).forEach(([k, v]) => paramMap.set(k, v));
+                    const serialized = Array.from(paramMap.entries()).map(([k, v]) => `${k}=${v}`).join(';');
+                    result.push(`a=fmtp:${pt} ${serialized}`);
+                    continue;
+                }
+
+                result.push(line);
+            }
+
+            // Adiciona fmtp para codecs de vídeo que ainda não tinham linha fmtp
+            const finalLines = [];
+            for (const line of result) {
+                finalLines.push(line);
+                const rtpmapMatch = line.match(/^a=rtpmap:(\d+)\s+(VP8|VP9|H264|AV1)\/90000/i);
+                if (rtpmapMatch && !fmtpSeen.has(rtpmapMatch[1])) {
+                    const pt = rtpmapMatch[1];
+                    fmtpSeen.add(pt);
+                    const serialized = Object.entries(videoBitrateParams).map(([k, v]) => `${k}=${v}`).join(';');
+                    finalLines.push(`a=fmtp:${pt} ${serialized}`);
+                }
+            }
+
+            return finalLines.join('\r\n');
+        } catch (e) {
+            return sdp;
         }
     },
 
@@ -1046,15 +1126,15 @@ const WebRTCManager = {
             }
             this.isScreenSharing = false;
         } else {
-            // Iniciar compartilhamento de tela FLUIDO (1080p @ 60fps + contentHint='motion') e ÁUDIO ESTÉREO HQ
+            // Iniciar compartilhamento de tela em 720p/1080p NÍTIDO (30fps estáveis) e ÁUDIO ESTÉREO HQ
             try {
                 try {
                     this.localScreenStream = await navigator.mediaDevices.getDisplayMedia({
                         video: {
                             cursor: 'always',
-                            width: { ideal: 1920, max: 1920 },
-                            height: { ideal: 1080, max: 1080 },
-                            frameRate: { ideal: 60, max: 60 }
+                            width: { min: 1280, ideal: 1920, max: 1920 },
+                            height: { min: 720, ideal: 1080, max: 1080 },
+                            frameRate: { ideal: 30, max: 60 }
                         },
                         audio: {
                             echoCancellation: false,
@@ -1068,7 +1148,7 @@ const WebRTCManager = {
                 } catch (constraintErr) {
                     // Fallback caso o navegador não aceite constraints avançadas
                     this.localScreenStream = await navigator.mediaDevices.getDisplayMedia({
-                        video: { cursor: 'always', frameRate: { ideal: 60, max: 60 } },
+                        video: { cursor: 'always', width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
                         audio: true
                     });
                 }
@@ -1142,7 +1222,7 @@ const WebRTCManager = {
             await this.renegotiatePeer(socketId);
         }
 
-        // Otimiza vídeo da transmissão para máxima fluidez (maintain-framerate, até 4 Mbps, 60 fps)
+        // Otimiza vídeo da transmissão para manter resolução HD (720p/1080p sem pixelizar, até 6 Mbps, 30 fps)
         for (const sender of screenVideoSenders) {
             if (sender && sender.getParameters) {
                 try {
@@ -1150,9 +1230,10 @@ const WebRTCManager = {
                     if (!params.encodings || params.encodings.length === 0) {
                         params.encodings = [{}];
                     }
-                    params.degradationPreference = 'maintain-framerate';
-                    params.encodings[0].maxBitrate = 4000000;
-                    params.encodings[0].maxFramerate = 60;
+                    params.degradationPreference = 'maintain-resolution';
+                    params.encodings[0].scaleResolutionDownBy = 1.0;
+                    params.encodings[0].maxBitrate = 6000000;
+                    params.encodings[0].maxFramerate = 30;
                     params.encodings[0].networkPriority = 'high';
                     await sender.setParameters(params).catch(() => {});
                 } catch (e) {}
