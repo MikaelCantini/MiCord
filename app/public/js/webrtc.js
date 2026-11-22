@@ -21,9 +21,10 @@ const WebRTCManager = {
     isNoiseSuppressionOn: true,
     isMicTestOn: false,
     
-    // Nós Web Audio API para supressão de ruído, noise gate adaptativo e retorno de voz (teste)
+    // Nós Web Audio API para supressão de ruído espectral (AudioWorklet), noise gate adaptativo e retorno de voz (teste)
     highpassFilter: null,
     highpassFilter2: null,
+    spectralWorkletNode: null,
     presenceFilter: null,
     lowpassFilter: null,
     noiseGateGain: null,
@@ -394,8 +395,8 @@ const WebRTCManager = {
                 video: false
             });
 
-            // Cria pipeline de supressão de ruído + detecção de fala
-            const processedStream = this.setupNoiseSuppressionAndVAD(this.rawMicStream);
+            // Cria pipeline de supressão de ruído espectral (AudioWorklet) + detecção de fala
+            const processedStream = await this.setupNoiseSuppressionAndVAD(this.rawMicStream);
             this.localAudioStream = processedStream || this.rawMicStream;
 
             // Respeita estado de mudo atual
@@ -446,10 +447,16 @@ const WebRTCManager = {
         if (this.audioContext) {
             const now = this.audioContext.currentTime;
             if (this.highpassFilter) {
-                this.highpassFilter.frequency.setTargetAtTime(this.isNoiseSuppressionOn ? 105 : 10, now, 0.02);
+                this.highpassFilter.frequency.setTargetAtTime(this.isNoiseSuppressionOn ? 115 : 10, now, 0.02);
             }
             if (this.highpassFilter2) {
-                this.highpassFilter2.frequency.setTargetAtTime(this.isNoiseSuppressionOn ? 105 : 10, now, 0.02);
+                this.highpassFilter2.frequency.setTargetAtTime(this.isNoiseSuppressionOn ? 115 : 10, now, 0.02);
+            }
+            if (this.spectralWorkletNode) {
+                const enabledParam = this.spectralWorkletNode.parameters.get('enabled');
+                if (enabledParam) {
+                    enabledParam.setValueAtTime(this.isNoiseSuppressionOn ? 1 : 0, now);
+                }
             }
             if (this.presenceFilter) {
                 this.presenceFilter.gain.setTargetAtTime(this.isNoiseSuppressionOn ? 2.5 : 0, now, 0.02);
@@ -880,42 +887,60 @@ const WebRTCManager = {
         }
     },
 
-    // Pipeline Avançado de Supressor de Ruído (High-Pass 4ª ordem + Low-Pass + Presença Vocal + Compressor + Noise Gate Adaptativo por Banda Vocal)
-    setupNoiseSuppressionAndVAD(rawStream) {
+    // Pipeline Avançado de Supressor de Ruído (High-Pass 4ª ordem + Filtro Espectral Wiener AudioWorklet + Low-Pass + Presença Vocal + Compressor + Noise Gate)
+    async setupNoiseSuppressionAndVAD(rawStream) {
         try {
             const AudioContextClass = window.AudioContext || window.webkitAudioContext;
             this.audioContext = new AudioContextClass({ sampleRate: 48000 });
             if (this.audioContext.state === 'suspended') {
-                this.audioContext.resume().catch(() => {});
+                await this.audioContext.resume().catch(() => {});
             }
 
             const source = this.audioContext.createMediaStreamSource(rawStream);
 
-            // 1. Filtro High-Pass em cascata (4ª ordem, -24 dB/oitava em 105 Hz): remove ventilador, zumbido e batidas
+            // 1. Filtro High-Pass em cascata (4ª ordem, -24 dB/oitava em 115 Hz): corta motor de ventilador, zumbido e batidas
             this.highpassFilter = this.audioContext.createBiquadFilter();
             this.highpassFilter.type = 'highpass';
-            this.highpassFilter.frequency.value = this.isNoiseSuppressionOn ? 105 : 10;
+            this.highpassFilter.frequency.value = this.isNoiseSuppressionOn ? 115 : 10;
             this.highpassFilter.Q.value = 0.707;
 
             this.highpassFilter2 = this.audioContext.createBiquadFilter();
             this.highpassFilter2.type = 'highpass';
-            this.highpassFilter2.frequency.value = this.isNoiseSuppressionOn ? 105 : 10;
+            this.highpassFilter2.frequency.value = this.isNoiseSuppressionOn ? 115 : 10;
             this.highpassFilter2.Q.value = 0.707;
 
-            // 2. Filtro Low-Pass (10.5 kHz): corta chiado agudo / estática de microfone
+            // 2. Supressor Espectral de Wiener em AudioWorklet (remove ruído contínuo de ventilador MESMO ENQUANTO FALA!)
+            this.spectralWorkletNode = null;
+            if (this.audioContext.audioWorklet) {
+                try {
+                    await this.audioContext.audioWorklet.addModule('/js/noise-suppressor-worklet.js');
+                    this.spectralWorkletNode = new AudioWorkletNode(this.audioContext, 'spectral-noise-suppressor', {
+                        numberOfInputs: 1,
+                        numberOfOutputs: 1,
+                        outputChannelCount: [1],
+                        parameterData: {
+                            enabled: this.isNoiseSuppressionOn ? 1 : 0
+                        }
+                    });
+                } catch (workletErr) {
+                    console.warn('[WebRTC] AudioWorklet espectral indisponível, usando filtros padrão:', workletErr);
+                }
+            }
+
+            // 3. Filtro Low-Pass (10.5 kHz): corta chiado agudo / estática de microfone
             this.lowpassFilter = this.audioContext.createBiquadFilter();
             this.lowpassFilter.type = 'lowpass';
             this.lowpassFilter.frequency.value = this.isNoiseSuppressionOn ? 10500 : 22000;
             this.lowpassFilter.Q.value = 0.707;
 
-            // 3. Leve realce na faixa de clareza da voz humana (2.8 kHz)
+            // 4. Leve realce na faixa de clareza da voz humana (2.8 kHz)
             this.presenceFilter = this.audioContext.createBiquadFilter();
             this.presenceFilter.type = 'peaking';
             this.presenceFilter.frequency.value = 2800;
             this.presenceFilter.Q.value = 1.0;
             this.presenceFilter.gain.value = this.isNoiseSuppressionOn ? 2.5 : 0;
 
-            // 4. Compressor suave (equilibra a voz sem puxar o ruído de fundo)
+            // 5. Compressor suave (equilibra a voz sem puxar o ruído de fundo)
             const compressor = this.audioContext.createDynamicsCompressor();
             compressor.threshold.value = -20;
             compressor.knee.value = 24;
@@ -923,15 +948,15 @@ const WebRTCManager = {
             compressor.attack.value = 0.006;
             compressor.release.value = 0.16;
 
-            // 5. Noise Gate Adaptativo (silencia 100% o ruído ambiente no silêncio)
+            // 6. Noise Gate Adaptativo (silencia 100% no silêncio)
             this.noiseGateGain = this.audioContext.createGain();
             this.noiseGateGain.gain.value = this.isNoiseSuppressionOn ? 0.0 : 1.0;
 
-            // 6. Retorno de voz para teste do supressor de ruído (desligado por padrão)
+            // 7. Retorno de voz para teste do supressor de ruído (desligado por padrão)
             this.micTestGain = this.audioContext.createGain();
             this.micTestGain.gain.value = this.isMicTestOn ? 1.0 : 0.0;
 
-            // Analyser para detecção na banda vocal (200 Hz - 3500 Hz) e controle do Noise Gate
+            // Analyser conectado APÓS o filtro espectral (assim ventilador não dispara o gate nem o anel verde)
             this.analyser = this.audioContext.createAnalyser();
             this.analyser.fftSize = 1024;
             this.analyser.smoothingTimeConstant = 0.5;
@@ -940,7 +965,12 @@ const WebRTCManager = {
 
             source.connect(this.highpassFilter);
             this.highpassFilter.connect(this.highpassFilter2);
-            this.highpassFilter2.connect(this.lowpassFilter);
+            if (this.spectralWorkletNode) {
+                this.highpassFilter2.connect(this.spectralWorkletNode);
+                this.spectralWorkletNode.connect(this.lowpassFilter);
+            } else {
+                this.highpassFilter2.connect(this.lowpassFilter);
+            }
             this.lowpassFilter.connect(this.analyser);
             this.lowpassFilter.connect(this.presenceFilter);
             this.presenceFilter.connect(compressor);
@@ -1717,6 +1747,7 @@ const WebRTCManager = {
         }
         this.highpassFilter = null;
         this.highpassFilter2 = null;
+        this.spectralWorkletNode = null;
         this.presenceFilter = null;
         this.lowpassFilter = null;
         this.noiseGateGain = null;
