@@ -144,6 +144,7 @@ const WebRTCManager = {
         });
 
         document.getElementById('btn-decline-call')?.addEventListener('click', () => {
+            if (window.App) window.App.stopRinging();
             if (this.pendingCall) {
                 this.socket.emit('call:reject', { callerSocketId: this.pendingCall.callerSocketId });
                 document.getElementById('incoming-call-banner').style.display = 'none';
@@ -157,6 +158,10 @@ const WebRTCManager = {
 
         // Entrou em uma sala de voz
         this.socket.on('voice:room-joined', async ({ channelId, self, peers }) => {
+            if (window.App) {
+                window.App.stopRinging();
+                window.App.playSound('join');
+            }
             // Fecha conexões antigas de sala anterior (evita RTCPeerConnection morta ao trocar de sala)
             this.peerConnections.forEach(pc => pc.close());
             this.peerConnections.clear();
@@ -182,12 +187,14 @@ const WebRTCManager = {
         this.socket.on('voice:peer-joined', ({ channelId, peer }) => {
             if (this.currentChannelId !== channelId) return;
             this.peersData.set(peer.socketId, peer);
+            if (window.App) window.App.playSound('peer-join');
             this.renderAllTiles();
             // O novo peer irá nos enviar oferta, apenas aguardamos
         });
 
         // Peer saiu da sala
         this.socket.on('voice:peer-left', ({ socketId }) => {
+            if (window.App) window.App.playSound('peer-leave');
             this.removePeer(socketId);
         });
 
@@ -334,9 +341,14 @@ const WebRTCManager = {
             document.getElementById('caller-type-desc').textContent = hasVideo ? 'Chamada de vídeo recebida...' : 'Chamada de voz recebida...';
             document.getElementById('caller-avatar').src = caller.avatar_url || '/assets/default-avatar.png';
             document.getElementById('incoming-call-banner').style.display = 'flex';
+            if (window.App) window.App.startRinging('incoming');
         });
 
         this.socket.on('call:accepted', async ({ peerSocketId, peer, hasVideo }) => {
+            if (window.App) {
+                window.App.stopRinging();
+                window.App.playSound('join');
+            }
             this.isDirectCall = true;
             this.peersData.set(peerSocketId, { socketId: peerSocketId, user: peer });
             this.showRoomView(`Chamada com ${peer.display_name || peer.username}`);
@@ -347,12 +359,18 @@ const WebRTCManager = {
         });
 
         this.socket.on('call:rejected', ({ reason, user }) => {
-            if (window.App) window.App.showToast(`Chamada recusada por ${user.display_name}.`);
+            if (window.App) {
+                window.App.stopRinging();
+                window.App.showToast(`Chamada recusada por ${user.display_name}.`);
+            }
             this.leaveRoom();
         });
 
         this.socket.on('call:ended', () => {
-            if (window.App) window.App.showToast('Chamada encerrada.');
+            if (window.App) {
+                window.App.stopRinging();
+                window.App.showToast('Chamada encerrada.');
+            }
             this.leaveRoom();
         });
     },
@@ -960,6 +978,7 @@ const WebRTCManager = {
         }
 
         this.socket.emit('voice:state-update', { isMuted: this.isMuted });
+        if (window.App) window.App.playSound(this.isMuted ? 'mute' : 'unmute');
         this.renderAllTiles();
     },
 
@@ -1027,12 +1046,14 @@ const WebRTCManager = {
             }
             this.isScreenSharing = false;
         } else {
-            // Iniciar compartilhamento de tela com ÁUDIO ESTÉREO DE ALTA QUALIDADE (sem filtros de voz que distorcem jogos/músicas)
+            // Iniciar compartilhamento de tela FLUIDO (1080p @ 60fps + contentHint='motion') e ÁUDIO ESTÉREO HQ
             try {
                 try {
                     this.localScreenStream = await navigator.mediaDevices.getDisplayMedia({
                         video: {
                             cursor: 'always',
+                            width: { ideal: 1920, max: 1920 },
+                            height: { ideal: 1080, max: 1080 },
                             frameRate: { ideal: 60, max: 60 }
                         },
                         audio: {
@@ -1045,19 +1066,29 @@ const WebRTCManager = {
                         }
                     });
                 } catch (constraintErr) {
-                    // Fallback caso o navegador não aceite constraints avançadas de áudio
+                    // Fallback caso o navegador não aceite constraints avançadas
                     this.localScreenStream = await navigator.mediaDevices.getDisplayMedia({
-                        video: { cursor: 'always' },
+                        video: { cursor: 'always', frameRate: { ideal: 60, max: 60 } },
                         audio: true
                     });
                 }
 
-                // Caso o usuário clique em "Parar Compartilhamento" nativo do navegador
-                this.localScreenStream.getVideoTracks()[0].onended = () => {
-                    if (this.isScreenSharing) {
-                        this.toggleScreenShare();
-                    }
-                };
+                // Define contentHint = 'motion' para o encoder priorizar fluidez (FPS alto) em jogos e vídeos em vez de slides
+                const screenVideoTrack = this.localScreenStream.getVideoTracks()[0];
+                if (screenVideoTrack) {
+                    try {
+                        if ('contentHint' in screenVideoTrack) {
+                            screenVideoTrack.contentHint = 'motion';
+                        }
+                    } catch (e) {}
+
+                    // Caso o usuário clique em "Parar Compartilhamento" nativo do navegador
+                    screenVideoTrack.onended = () => {
+                        if (this.isScreenSharing) {
+                            this.toggleScreenShare();
+                        }
+                    };
+                }
 
                 this.isScreenSharing = true;
                 // Avisa os peers o screenStreamId ANTES de renegociar os tracks para separar o áudio da transmissão corretamente
@@ -1091,14 +1122,16 @@ const WebRTCManager = {
     async attachTracksToAllPeers(stream) {
         const modifiedPeers = new Set();
         const screenAudioSenders = [];
+        const screenVideoSenders = [];
         stream.getTracks().forEach(track => {
             this.peerConnections.forEach((pc, socketId) => {
                 const senders = pc.getSenders();
                 const exists = senders.some(s => s.track && s.track.id === track.id);
                 if (!exists) {
                     const sender = pc.addTrack(track, stream);
-                    if (stream === this.localScreenStream && track.kind === 'audio' && sender) {
-                        screenAudioSenders.push(sender);
+                    if (stream === this.localScreenStream && sender) {
+                        if (track.kind === 'audio') screenAudioSenders.push(sender);
+                        if (track.kind === 'video') screenVideoSenders.push(sender);
                     }
                     modifiedPeers.add(socketId);
                 }
@@ -1107,6 +1140,23 @@ const WebRTCManager = {
 
         for (const socketId of modifiedPeers) {
             await this.renegotiatePeer(socketId);
+        }
+
+        // Otimiza vídeo da transmissão para máxima fluidez (maintain-framerate, até 4 Mbps, 60 fps)
+        for (const sender of screenVideoSenders) {
+            if (sender && sender.getParameters) {
+                try {
+                    const params = sender.getParameters();
+                    if (!params.encodings || params.encodings.length === 0) {
+                        params.encodings = [{}];
+                    }
+                    params.degradationPreference = 'maintain-framerate';
+                    params.encodings[0].maxBitrate = 4000000;
+                    params.encodings[0].maxFramerate = 60;
+                    params.encodings[0].networkPriority = 'high';
+                    await sender.setParameters(params).catch(() => {});
+                } catch (e) {}
+            }
         }
 
         // Aplica bitrate de 192 kbps no áudio da transmissão após a renegociação
@@ -1604,8 +1654,12 @@ const WebRTCManager = {
         this.pinnedSocketId = null;
         this.peersData.clear();
 
-        // Volta para a visualização padrão
-        if (window.App) window.App.showHomeView();
+        // Para toque de chamada se estiver tocando e toca som de desconexão
+        if (window.App) {
+            window.App.stopRinging();
+            window.App.playSound('leave');
+            window.App.showHomeView();
+        }
     },
 
     // Iniciar chamada 1-a-1 com amigo
@@ -1613,12 +1667,19 @@ const WebRTCManager = {
         this.isDirectCall = true;
         this.socket.emit('call:initiate', { recipientId: friendId, hasVideo });
         this.showRoomView(`Chamando amigo...`);
-        if (window.App) window.App.showToast(`Iniciando chamada com ${hasVideo ? 'câmera' : 'voz'}...`);
+        if (window.App) {
+            window.App.startRinging('outgoing');
+            window.App.showToast(`Iniciando chamada com ${hasVideo ? 'câmera' : 'voz'}...`);
+        }
     },
 
     // Aceitar chamada 1-a-1 recebida
     async acceptCall(callerSocketId, hasVideo) {
         document.getElementById('incoming-call-banner').style.display = 'none';
+        if (window.App) {
+            window.App.stopRinging();
+            window.App.playSound('join');
+        }
         this.isDirectCall = true;
         this.socket.emit('call:accept', { callerSocketId, hasVideo });
     }

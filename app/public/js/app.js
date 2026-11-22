@@ -396,33 +396,109 @@ const App = {
         }, 4000);
     },
 
-    // Sintetizador de Som de Notificação Suave com Web Audio API
+    // Sintetizador de Sons de Ações (Notificação, Entrar/Sair da Call, Mudo e Toque de Chamada Privada)
+    ringInterval: null,
+
+    ensureAudioCtx() {
+        if (!this.audioCtx) {
+            const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+            this.audioCtx = new AudioContextClass();
+        }
+        if (this.audioCtx.state === 'suspended') {
+            this.audioCtx.resume().catch(() => {});
+        }
+        return this.audioCtx;
+    },
+
+    playTone(ctx, freq, startOffset, duration, volume = 0.09, type = 'sine') {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        const t0 = ctx.currentTime + startOffset;
+
+        osc.type = type;
+        osc.frequency.setValueAtTime(freq, t0);
+
+        gain.gain.setValueAtTime(0.0001, t0);
+        gain.gain.linearRampToValueAtTime(volume, t0 + 0.015);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t0 + duration);
+
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+
+        osc.start(t0);
+        osc.stop(t0 + duration + 0.02);
+    },
+
+    playSound(type) {
+        try {
+            const ctx = this.ensureAudioCtx();
+            if (type === 'join') {
+                // Entrou na call: 2 notas ascendentes agradáveis (estilo Discord)
+                this.playTone(ctx, 440.0, 0.0, 0.14, 0.10, 'sine');
+                this.playTone(ctx, 659.25, 0.09, 0.22, 0.11, 'sine');
+            } else if (type === 'peer-join') {
+                // Amigo entrou na call: toque suave ascendente
+                this.playTone(ctx, 523.25, 0.0, 0.11, 0.08, 'sine');
+                this.playTone(ctx, 783.99, 0.08, 0.16, 0.08, 'sine');
+            } else if (type === 'leave') {
+                // Desconectou da call: 2 notas descendentes
+                this.playTone(ctx, 493.88, 0.0, 0.13, 0.10, 'sine');
+                this.playTone(ctx, 329.63, 0.09, 0.22, 0.10, 'sine');
+            } else if (type === 'peer-leave') {
+                // Amigo saiu da call: toque discreto descendente
+                this.playTone(ctx, 440.0, 0.0, 0.10, 0.07, 'sine');
+                this.playTone(ctx, 293.66, 0.08, 0.16, 0.07, 'sine');
+            } else if (type === 'mute') {
+                this.playTone(ctx, 360.0, 0.0, 0.09, 0.07, 'triangle');
+            } else if (type === 'unmute') {
+                this.playTone(ctx, 540.0, 0.0, 0.09, 0.07, 'triangle');
+            } else if (type === 'ring-outgoing') {
+                // Som de chamando no privado (tuu... tuu...)
+                this.playTone(ctx, 440.0, 0.0, 0.45, 0.06, 'sine');
+                this.playTone(ctx, 480.0, 0.0, 0.45, 0.04, 'sine');
+            } else if (type === 'ring-incoming') {
+                // Som de ligação recebida no privado
+                this.playTone(ctx, 587.33, 0.0, 0.16, 0.09, 'sine');
+                this.playTone(ctx, 783.99, 0.14, 0.16, 0.09, 'sine');
+                this.playTone(ctx, 987.77, 0.28, 0.24, 0.09, 'sine');
+            }
+        } catch (e) {}
+    },
+
+    startRinging(mode = 'outgoing') {
+        this.stopRinging();
+        const soundType = mode === 'incoming' ? 'ring-incoming' : 'ring-outgoing';
+        this.playSound(soundType);
+        this.ringInterval = setInterval(() => {
+            this.playSound(soundType);
+        }, mode === 'incoming' ? 1800 : 2200);
+    },
+
+    stopRinging() {
+        if (this.ringInterval) {
+            clearInterval(this.ringInterval);
+            this.ringInterval = null;
+        }
+    },
+
     playNotificationSound() {
         try {
-            if (!this.audioCtx) {
-                const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-                this.audioCtx = new AudioContextClass();
-            }
-
-            if (this.audioCtx.state === 'suspended') {
-                this.audioCtx.resume();
-            }
-
-            const osc = this.audioCtx.createOscillator();
-            const gain = this.audioCtx.createGain();
+            const ctx = this.ensureAudioCtx();
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
 
             osc.type = 'sine';
-            osc.frequency.setValueAtTime(587.33, this.audioCtx.currentTime); // D5
-            osc.frequency.exponentialRampToValueAtTime(880.00, this.audioCtx.currentTime + 0.12); // A5
+            osc.frequency.setValueAtTime(587.33, ctx.currentTime); // D5
+            osc.frequency.exponentialRampToValueAtTime(880.00, ctx.currentTime + 0.12); // A5
 
-            gain.gain.setValueAtTime(0.08, this.audioCtx.currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.001, this.audioCtx.currentTime + 0.25);
+            gain.gain.setValueAtTime(0.08, ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
 
             osc.connect(gain);
-            gain.connect(this.audioCtx.destination);
+            gain.connect(ctx.destination);
 
             osc.start();
-            osc.stop(this.audioCtx.currentTime + 0.25);
+            osc.stop(ctx.currentTime + 0.25);
         } catch (e) {}
     }
 };
