@@ -384,18 +384,15 @@ const WebRTCManager = {
                 audio: {
                     echoCancellation: true,
                     noiseSuppression: this.isNoiseSuppressionOn,
-                    // Desativa AGC quando supressor está ligado para evitar que o navegador aumente o ruído de fundo no silêncio
-                    autoGainControl: !this.isNoiseSuppressionOn,
+                    autoGainControl: true,
                     channelCount: 1,
                     sampleRate: 48000,
-                    googNoiseSuppression: this.isNoiseSuppressionOn,
-                    googHighpassFilter: this.isNoiseSuppressionOn,
-                    googTypingNoiseDetection: this.isNoiseSuppressionOn
+                    sampleSize: 16
                 },
                 video: false
             });
 
-            // Cria pipeline de supressão de ruído espectral (AudioWorklet) + detecção de fala
+            // Cria pipeline limpo de alta fidelidade (High-Pass 80 Hz + Noise Gate suave + detecção de fala)
             const processedStream = await this.setupNoiseSuppressionAndVAD(this.rawMicStream);
             this.localAudioStream = processedStream || this.rawMicStream;
 
@@ -437,7 +434,7 @@ const WebRTCManager = {
                     await rawTrack.applyConstraints({
                         echoCancellation: true,
                         noiseSuppression: this.isNoiseSuppressionOn,
-                        autoGainControl: !this.isNoiseSuppressionOn
+                        autoGainControl: true
                     });
                 } catch (e) {}
             }
@@ -447,22 +444,7 @@ const WebRTCManager = {
         if (this.audioContext) {
             const now = this.audioContext.currentTime;
             if (this.highpassFilter) {
-                this.highpassFilter.frequency.setTargetAtTime(this.isNoiseSuppressionOn ? 115 : 10, now, 0.02);
-            }
-            if (this.highpassFilter2) {
-                this.highpassFilter2.frequency.setTargetAtTime(this.isNoiseSuppressionOn ? 115 : 10, now, 0.02);
-            }
-            if (this.spectralWorkletNode) {
-                const enabledParam = this.spectralWorkletNode.parameters.get('enabled');
-                if (enabledParam) {
-                    enabledParam.setValueAtTime(this.isNoiseSuppressionOn ? 1 : 0, now);
-                }
-            }
-            if (this.presenceFilter) {
-                this.presenceFilter.gain.setTargetAtTime(this.isNoiseSuppressionOn ? 2.5 : 0, now, 0.02);
-            }
-            if (this.lowpassFilter) {
-                this.lowpassFilter.frequency.setTargetAtTime(this.isNoiseSuppressionOn ? 10500 : 22000, now, 0.02);
+                this.highpassFilter.frequency.setTargetAtTime(this.isNoiseSuppressionOn ? 80 : 10, now, 0.02);
             }
             if (this.noiseGateGain && !this.isNoiseSuppressionOn) {
                 this.noiseGateGain.gain.setTargetAtTime(1.0, now, 0.02);
@@ -887,7 +869,7 @@ const WebRTCManager = {
         }
     },
 
-    // Pipeline Avançado de Supressor de Ruído (High-Pass 4ª ordem + Filtro Espectral Wiener AudioWorklet + Low-Pass + Presença Vocal + Compressor + Noise Gate)
+    // Pipeline Limpo de Alta Fidelidade (Supressor Neural nativo do navegador + High-Pass suave 80 Hz + Noise Gate natural)
     async setupNoiseSuppressionAndVAD(rawStream) {
         try {
             const AudioContextClass = window.AudioContext || window.webkitAudioContext;
@@ -898,99 +880,47 @@ const WebRTCManager = {
 
             const source = this.audioContext.createMediaStreamSource(rawStream);
 
-            // 1. Filtro High-Pass em cascata (4ª ordem, -24 dB/oitava em 115 Hz): corta motor de ventilador, zumbido e batidas
+            // 1. Filtro High-Pass suave (80 Hz, 2ª ordem): corta zumbido grave do ventilador mantendo 100% do timbre natural da voz
             this.highpassFilter = this.audioContext.createBiquadFilter();
             this.highpassFilter.type = 'highpass';
-            this.highpassFilter.frequency.value = this.isNoiseSuppressionOn ? 115 : 10;
+            this.highpassFilter.frequency.value = this.isNoiseSuppressionOn ? 80 : 10;
             this.highpassFilter.Q.value = 0.707;
 
-            this.highpassFilter2 = this.audioContext.createBiquadFilter();
-            this.highpassFilter2.type = 'highpass';
-            this.highpassFilter2.frequency.value = this.isNoiseSuppressionOn ? 115 : 10;
-            this.highpassFilter2.Q.value = 0.707;
-
-            // 2. Supressor Espectral de Wiener em AudioWorklet (remove ruído contínuo de ventilador MESMO ENQUANTO FALA!)
-            this.spectralWorkletNode = null;
-            if (this.audioContext.audioWorklet) {
-                try {
-                    await this.audioContext.audioWorklet.addModule('/js/noise-suppressor-worklet.js');
-                    this.spectralWorkletNode = new AudioWorkletNode(this.audioContext, 'spectral-noise-suppressor', {
-                        numberOfInputs: 1,
-                        numberOfOutputs: 1,
-                        outputChannelCount: [1],
-                        parameterData: {
-                            enabled: this.isNoiseSuppressionOn ? 1 : 0
-                        }
-                    });
-                } catch (workletErr) {
-                    console.warn('[WebRTC] AudioWorklet espectral indisponível, usando filtros padrão:', workletErr);
-                }
-            }
-
-            // 3. Filtro Low-Pass (10.5 kHz): corta chiado agudo / estática de microfone
-            this.lowpassFilter = this.audioContext.createBiquadFilter();
-            this.lowpassFilter.type = 'lowpass';
-            this.lowpassFilter.frequency.value = this.isNoiseSuppressionOn ? 10500 : 22000;
-            this.lowpassFilter.Q.value = 0.707;
-
-            // 4. Leve realce na faixa de clareza da voz humana (2.8 kHz)
-            this.presenceFilter = this.audioContext.createBiquadFilter();
-            this.presenceFilter.type = 'peaking';
-            this.presenceFilter.frequency.value = 2800;
-            this.presenceFilter.Q.value = 1.0;
-            this.presenceFilter.gain.value = this.isNoiseSuppressionOn ? 2.5 : 0;
-
-            // 5. Compressor suave (equilibra a voz sem puxar o ruído de fundo)
-            const compressor = this.audioContext.createDynamicsCompressor();
-            compressor.threshold.value = -20;
-            compressor.knee.value = 24;
-            compressor.ratio.value = 3;
-            compressor.attack.value = 0.006;
-            compressor.release.value = 0.16;
-
-            // 6. Noise Gate Adaptativo (silencia 100% no silêncio)
+            // 2. Noise Gate suave (mantém voz 100% pura e limpa ao falar, e silencia o ventilador nas pausas)
             this.noiseGateGain = this.audioContext.createGain();
-            this.noiseGateGain.gain.value = this.isNoiseSuppressionOn ? 0.0 : 1.0;
+            this.noiseGateGain.gain.value = 1.0;
 
-            // 7. Retorno de voz para teste do supressor de ruído (desligado por padrão)
+            // 3. Retorno de voz para teste do microfone (desligado por padrão)
             this.micTestGain = this.audioContext.createGain();
             this.micTestGain.gain.value = this.isMicTestOn ? 1.0 : 0.0;
 
-            // Analyser conectado APÓS o filtro espectral (assim ventilador não dispara o gate nem o anel verde)
+            // Analyser para detecção de voz e controle suave do Noise Gate
             this.analyser = this.audioContext.createAnalyser();
             this.analyser.fftSize = 1024;
-            this.analyser.smoothingTimeConstant = 0.5;
+            this.analyser.smoothingTimeConstant = 0.55;
 
             const destination = this.audioContext.createMediaStreamDestination();
 
+            // Cadeia ultra-transparente: sem dupla compressão nem distorção espectral
             source.connect(this.highpassFilter);
-            this.highpassFilter.connect(this.highpassFilter2);
-            if (this.spectralWorkletNode) {
-                this.highpassFilter2.connect(this.spectralWorkletNode);
-                this.spectralWorkletNode.connect(this.lowpassFilter);
-            } else {
-                this.highpassFilter2.connect(this.lowpassFilter);
-            }
-            this.lowpassFilter.connect(this.analyser);
-            this.lowpassFilter.connect(this.presenceFilter);
-            this.presenceFilter.connect(compressor);
-            compressor.connect(this.noiseGateGain);
+            this.highpassFilter.connect(this.analyser);
+            this.highpassFilter.connect(this.noiseGateGain);
             this.noiseGateGain.connect(destination);
             this.noiseGateGain.connect(this.micTestGain);
             this.micTestGain.connect(this.audioContext.destination);
 
             const sampleRate = this.audioContext.sampleRate || 48000;
             const binHz = sampleRate / this.analyser.fftSize;
-            const voiceBinStart = Math.max(1, Math.floor(200 / binHz));
-            const voiceBinEnd = Math.min(this.analyser.frequencyBinCount - 1, Math.ceil(3500 / binHz));
+            const voiceBinStart = Math.max(1, Math.floor(180 / binHz));
+            const voiceBinEnd = Math.min(this.analyser.frequencyBinCount - 1, Math.ceil(3800 / binHz));
 
             const timeData = new Float32Array(this.analyser.fftSize);
             const freqBuffer = new Uint8Array(this.analyser.frequencyBinCount);
-            this.ambientNoiseFloor = 0.008;
-            this.gateIsOpen = false;
+            this.ambientNoiseFloor = 0.006;
+            this.gateIsOpen = true;
+            this.lastSpeechTime = Date.now();
 
             if (this.speechInterval) clearInterval(this.speechInterval);
-            // Loop rápido (16ms) para ataque instantâneo sem picotar início das palavras
             this.speechInterval = setInterval(() => {
                 if (!this.analyser || !this.audioContext) return;
 
@@ -1003,7 +933,6 @@ const WebRTCManager = {
                     return;
                 }
 
-                // Energia RMS total + energia específica na faixa vocal (200-3500 Hz)
                 this.analyser.getFloatTimeDomainData(timeData);
                 let rmsSum = 0;
                 for (let i = 0; i < timeData.length; i++) {
@@ -1017,39 +946,35 @@ const WebRTCManager = {
                 for (let i = voiceBinStart; i <= voiceBinEnd; i++) {
                     voiceSum += freqBuffer[i];
                 }
-                const voiceAvg = (voiceSum / voiceCount) / 255; // normalizado 0..1
-
-                // Combinação ponderada favorecendo a faixa vocal humana
-                const signalLevel = (voiceAvg * 0.65) + (rms * 0.35);
+                const voiceAvg = (voiceSum / voiceCount) / 255;
+                const signalLevel = (voiceAvg * 0.6) + (rms * 0.4);
 
                 const nowMs = Date.now();
                 const nowCtx = this.audioContext.currentTime;
 
                 if (this.isNoiseSuppressionOn && this.noiseGateGain) {
-                    const openThreshold = Math.max(this.ambientNoiseFloor * 2.5, 0.022);
-                    const holdThreshold = Math.max(this.ambientNoiseFloor * 1.6, 0.014);
+                    const openThreshold = Math.max(this.ambientNoiseFloor * 2.1, 0.015);
+                    const holdThreshold = Math.max(this.ambientNoiseFloor * 1.4, 0.010);
 
                     if ((!this.gateIsOpen && signalLevel > openThreshold) || (this.gateIsOpen && signalLevel > holdThreshold)) {
                         this.gateIsOpen = true;
                         this.lastSpeechTime = nowMs;
-                        // Ataque ultra-rápido (8ms) -> não corta a primeira sílaba
-                        this.noiseGateGain.gain.setTargetAtTime(1.0, nowCtx, 0.008);
-                    } else if (nowMs - this.lastSpeechTime > 420) {
+                        // Ataque instantâneo (5ms) -> zero corte no começo das palavras
+                        this.noiseGateGain.gain.setTargetAtTime(1.0, nowCtx, 0.005);
+                    } else if (nowMs - this.lastSpeechTime > 550) {
                         this.gateIsOpen = false;
-                        // Calibra piso de ruído ambiente apenas quando não está falando
-                        this.ambientNoiseFloor = (this.ambientNoiseFloor * 0.96) + (Math.min(signalLevel, 0.045) * 0.04);
-                        // Fecha suavemente para silêncio total (0.0)
-                        this.noiseGateGain.gain.setTargetAtTime(0.0, nowCtx, 0.06);
+                        this.ambientNoiseFloor = (this.ambientNoiseFloor * 0.97) + (Math.min(signalLevel, 0.035) * 0.03);
+                        // Fecha suavemente para silêncio nas pausas
+                        this.noiseGateGain.gain.setTargetAtTime(0.0, nowCtx, 0.09);
                     }
                 } else if (this.noiseGateGain) {
                     this.gateIsOpen = true;
                     this.noiseGateGain.gain.setTargetAtTime(1.0, nowCtx, 0.02);
                 }
 
-                // Indicador visual de fala (glow verde)
                 const isSpeakingNow = this.isNoiseSuppressionOn
                     ? this.gateIsOpen
-                    : (signalLevel > 0.025);
+                    : (signalLevel > 0.020);
 
                 if (isSpeakingNow !== this.isSpeaking) {
                     this.isSpeaking = isSpeakingNow;
@@ -1232,6 +1157,7 @@ const WebRTCManager = {
     async attachTracksToAllPeers(stream) {
         const modifiedPeers = new Set();
         const screenAudioSenders = [];
+        const voiceAudioSenders = [];
         const screenVideoSenders = [];
         stream.getTracks().forEach(track => {
             this.peerConnections.forEach((pc, socketId) => {
@@ -1242,6 +1168,8 @@ const WebRTCManager = {
                     if (stream === this.localScreenStream && sender) {
                         if (track.kind === 'audio') screenAudioSenders.push(sender);
                         if (track.kind === 'video') screenVideoSenders.push(sender);
+                    } else if (stream === this.localAudioStream && track.kind === 'audio' && sender) {
+                        voiceAudioSenders.push(sender);
                     }
                     modifiedPeers.add(socketId);
                 }
@@ -1250,6 +1178,21 @@ const WebRTCManager = {
 
         for (const socketId of modifiedPeers) {
             await this.renegotiatePeer(socketId);
+        }
+
+        // Garante alta qualidade (128 kbps Opus 48 kHz) na voz dos participantes
+        for (const sender of voiceAudioSenders) {
+            if (sender && sender.getParameters) {
+                try {
+                    const params = sender.getParameters();
+                    if (!params.encodings || params.encodings.length === 0) {
+                        params.encodings = [{}];
+                    }
+                    params.encodings[0].maxBitrate = 128000;
+                    params.encodings[0].networkPriority = 'high';
+                    await sender.setParameters(params).catch(() => {});
+                } catch (e) {}
+            }
         }
 
         // Otimiza vídeo da transmissão para manter resolução HD (720p/1080p sem pixelizar, até 6 Mbps, 30 fps)
