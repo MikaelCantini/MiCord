@@ -217,34 +217,15 @@
     color: #ffffff;
 }
 
-/* Barra superior de controles por participante (Volume / Print / Fechar Tela / Fechar Câmera) */
+/* Barra superior de controles por participante (Volume / Fechar Tela / Fechar Câmera) */
 .tile-top-actions {
     position: absolute;
     top: 10px;
     right: 10px;
     display: flex;
-    flex-wrap: wrap;
-    justify-content: flex-end;
-    max-width: calc(100% - 20px);
     align-items: center;
     gap: 6px;
     z-index: 15;
-}
-
-/* Efeito visual de flash ao tirar print */
-.screenshot-flash {
-    position: absolute;
-    inset: 0;
-    background: #ffffff;
-    opacity: 0;
-    pointer-events: none;
-    z-index: 30;
-    animation: screenshotFlash 0.35s ease-out forwards;
-}
-
-@keyframes screenshotFlash {
-    0% { opacity: 0.75; }
-    100% { opacity: 0; }
 }
 
 .tile-action-btn {

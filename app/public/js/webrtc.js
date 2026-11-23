@@ -1293,7 +1293,6 @@ const WebRTCManager = {
                     <video class="participant-video screen-share" id="self-screen-video" autoplay muted playsinline></video>
                     <div class="tile-top-actions">
                         <button type="button" class="tile-action-btn ${selfIsPinned ? 'pinned-active' : ''}" onclick="WebRTCManager.togglePinScreen('self')" title="${selfIsPinned ? 'Remover prioridade' : 'Priorizar esta transmissão (deixar maior)'}">${selfIsPinned ? '📌 Priorizada' : '📌 Priorizar'}</button>
-                        <button type="button" class="tile-action-btn" onclick="WebRTCManager.captureScreenshot('self-screen-video', 'tela', 'self')" title="Tirar print desta transmissão">📸 Print</button>
                         <button type="button" class="tile-action-btn" onclick="WebRTCManager.toggleFullscreen('peer-tile-self-screen')" title="Tela cheia">⛶ Tela Cheia</button>
                     </div>
                     <div class="participant-overlay">
@@ -1326,7 +1325,6 @@ const WebRTCManager = {
 
             if (this.isVideoOn && this.localVideoStream) {
                 selfMediaHtml = `<video class="participant-video" id="self-cam-video" autoplay muted playsinline></video>`;
-                selfTopButtons += `<button type="button" class="tile-action-btn" onclick="WebRTCManager.captureScreenshot('self-cam-video', 'webcam', 'self')" title="Tirar print da câmera">📸</button>`;
                 selfTopButtons += `<button type="button" class="tile-action-btn" onclick="WebRTCManager.toggleFullscreen('peer-tile-self')" title="Tela cheia">⛶</button>`;
             } else {
                 selfMediaHtml = `
@@ -1393,7 +1391,6 @@ const WebRTCManager = {
 
                     let screenButtons = `
                         <button type="button" class="tile-action-btn ${isPinned ? 'pinned-active' : ''}" onclick="WebRTCManager.togglePinScreen('${socketId}')" title="${isPinned ? 'Remover prioridade' : 'Priorizar esta transmissão (deixar maior)'}">${isPinned ? '📌 Priorizada' : '📌 Priorizar'}</button>
-                        <button type="button" class="tile-action-btn" onclick="WebRTCManager.captureScreenshot('video-screen-${socketId}', 'tela', '${socketId}')" title="Tirar print desta transmissão">📸 Print</button>
                         <button type="button" class="tile-action-btn" onclick="WebRTCManager.toggleFullscreen('${screenTileId}')" title="Tela cheia">⛶ Tela Cheia</button>
                         <button type="button" class="tile-action-btn" onclick="WebRTCManager.toggleVolumePopover('screen-${socketId}')" title="Ajustar volume da transmissão">🔊 ${screenPct}%</button>
                         <button type="button" class="tile-action-btn" onclick="WebRTCManager.toggleHidePeerMedia('${socketId}', 'screen')" title="Fechar transmissão para mim">✕ Fechar Tela</button>
@@ -1466,7 +1463,6 @@ const WebRTCManager = {
                 }
                 if (hasLiveCam) {
                     if (!hidden.video) {
-                        topButtonsHtml += `<button type="button" class="tile-action-btn" onclick="WebRTCManager.captureScreenshot('video-cam-${socketId}', 'webcam', '${socketId}')" title="Tirar print da câmera">📸</button>`;
                         topButtonsHtml += `<button type="button" class="tile-action-btn" onclick="WebRTCManager.toggleFullscreen('${peerTileId}')" title="Tela cheia">⛶</button>`;
                     }
                     topButtonsHtml += `<button type="button" class="tile-action-btn" onclick="WebRTCManager.toggleHidePeerMedia('${socketId}', 'video')" title="${hidden.video ? 'Mostrar câmera' : 'Fechar câmera para mim'}">${hidden.video ? '📹 Ver Câmera' : '✕ Fechar Câmera'}</button>`;
@@ -1572,93 +1568,6 @@ const WebRTCManager = {
         } else {
             if (el.requestFullscreen) el.requestFullscreen().catch(() => {});
             else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
-        }
-    },
-
-    // Tira print (captura de tela PNG) de um vídeo de transmissão ou webcam
-    async captureScreenshot(videoId, mediaType = 'tela', ownerKey = 'self') {
-        const videoEl = document.getElementById(videoId);
-        if (!videoEl || videoEl.readyState < 2 || !videoEl.videoWidth || !videoEl.videoHeight) {
-            if (window.App) window.App.showToast('Aguarde o vídeo carregar para tirar o print.');
-            return;
-        }
-
-        try {
-            const canvas = document.createElement('canvas');
-            canvas.width = videoEl.videoWidth;
-            canvas.height = videoEl.videoHeight;
-            const ctx = canvas.getContext('2d');
-            ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
-
-            // Efeito visual rápido de flash no tile
-            const tile = videoEl.closest('.participant-tile');
-            if (tile) {
-                const flash = document.createElement('div');
-                flash.className = 'screenshot-flash';
-                tile.appendChild(flash);
-                setTimeout(() => flash.remove(), 400);
-            }
-
-            // Monta nome limpo para o arquivo
-            let rawName = 'voce';
-            if (ownerKey === 'self') {
-                const currentUser = window.AuthManager?.user;
-                rawName = currentUser?.username || currentUser?.display_name || 'voce';
-            } else {
-                const peer = this.peersData.get(ownerKey);
-                rawName = peer?.user?.username || peer?.user?.display_name || 'usuario';
-            }
-            const safeName = String(rawName)
-                .normalize('NFD')
-                .replace(/[\u0300-\u036f]/g, '')
-                .toLowerCase()
-                .replace(/[^a-z0-9]+/g, '-')
-                .replace(/^-+|-+$/g, '') || 'usuario';
-
-            const now = new Date();
-            const pad = n => String(n).padStart(2, '0');
-            const timestamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
-            const fileName = `print-${mediaType}-${safeName}-${timestamp}.png`;
-
-            const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
-            if (!blob) {
-                if (window.App) window.App.showToast('Não foi possível gerar o print.');
-                return;
-            }
-
-            // Download automático do PNG
-            const url = URL.createObjectURL(blob);
-            const link = document.createElement('a');
-            link.href = url;
-            link.download = fileName;
-            document.body.appendChild(link);
-            link.click();
-            link.remove();
-            setTimeout(() => URL.revokeObjectURL(url), 1000);
-
-            // Tenta copiar também para a área de transferência (Ctrl+V)
-            let copiedToClipboard = false;
-            if (navigator.clipboard && window.ClipboardItem) {
-                try {
-                    await navigator.clipboard.write([
-                        new ClipboardItem({ 'image/png': blob })
-                    ]);
-                    copiedToClipboard = true;
-                } catch (e) {
-                    // Ignora silenciosamente se não houver permissão/HTTPS
-                }
-            }
-
-            if (window.App) {
-                window.App.showToast(
-                    copiedToClipboard
-                        ? '📸 Print salvo e copiado para a área de transferência!'
-                        : '📸 Print salvo com sucesso!'
-                );
-            }
-        } catch (err) {
-            console.error('[WebRTC] Erro ao tirar print:', err);
-            if (window.App) window.App.showToast('Erro ao capturar print da transmissão.');
         }
     },
 
