@@ -376,6 +376,11 @@ body {
     font-weight: 700;
 }
 
+.server-btn.add-btn:hover {
+    color: #ffffff;
+    border-color: var(--accent-pink);
+}
+
 .server-btn.theme-btn {
     background: var(--bg-tertiary);
     border-color: var(--border-color);

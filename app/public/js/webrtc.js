@@ -337,6 +337,9 @@ const WebRTCManager = {
 
         // Chamada direta recebida (1-on-1)
         this.socket.on('call:incoming', ({ caller, callerSocketId, hasVideo }) => {
+            // Se já está em uma chamada ou sala de voz, não exibe o banner de aceitar/recusar por cima
+            if (this.isDirectCall || this.currentChannelId) return;
+
             this.pendingCall = { caller, callerSocketId, hasVideo };
             document.getElementById('caller-name').textContent = caller.display_name || caller.username;
             document.getElementById('caller-type-desc').textContent = hasVideo ? 'Chamada de vídeo recebida...' : 'Chamada de voz recebida...';
@@ -345,7 +348,39 @@ const WebRTCManager = {
             if (window.App) window.App.startRinging('incoming');
         });
 
+        // Fecha o banner de chamada recebida (quando atendida ou recusada em qualquer guia)
+        this.socket.on('call:dismiss-incoming', () => {
+            const banner = document.getElementById('incoming-call-banner');
+            if (banner) banner.style.display = 'none';
+            this.pendingCall = null;
+            if (window.App) window.App.stopRinging();
+        });
+
+        // Para quem atendeu a chamada privada 1-a-1: abre a tela da call e inicia áudio local
+        this.socket.on('call:connected', async ({ peerSocketId, peer, hasVideo }) => {
+            const banner = document.getElementById('incoming-call-banner');
+            if (banner) banner.style.display = 'none';
+            this.pendingCall = null;
+            if (window.App) window.App.stopRinging();
+
+            this.isDirectCall = true;
+            if (peerSocketId) {
+                this.peersData.set(peerSocketId, {
+                    socketId: peerSocketId,
+                    user: peer || { username: 'Amigo', display_name: 'Amigo' }
+                });
+            }
+            const peerName = peer ? (peer.display_name || peer.username) : 'Amigo';
+            this.showRoomView(`Chamada com ${peerName}`);
+            this.renderAllTiles();
+            await this.startLocalAudio();
+            if (hasVideo && !this.isVideoOn) await this.toggleVideo();
+        });
+
         this.socket.on('call:accepted', async ({ peerSocketId, peer, hasVideo }) => {
+            const banner = document.getElementById('incoming-call-banner');
+            if (banner) banner.style.display = 'none';
+            this.pendingCall = null;
             if (window.App) {
                 window.App.stopRinging();
                 window.App.playSound('join');
@@ -1709,6 +1744,11 @@ const WebRTCManager = {
         this.pinnedSocketId = null;
         this.peersData.clear();
 
+        // Garante que o banner de chamada recebida feche ao sair
+        const banner = document.getElementById('incoming-call-banner');
+        if (banner) banner.style.display = 'none';
+        this.pendingCall = null;
+
         // Para toque de chamada se estiver tocando e toca som de desconexão
         if (window.App) {
             window.App.stopRinging();
@@ -1730,7 +1770,9 @@ const WebRTCManager = {
 
     // Aceitar chamada 1-a-1 recebida
     async acceptCall(callerSocketId, hasVideo) {
-        document.getElementById('incoming-call-banner').style.display = 'none';
+        const banner = document.getElementById('incoming-call-banner');
+        if (banner) banner.style.display = 'none';
+        this.pendingCall = null;
         if (window.App) {
             window.App.stopRinging();
             window.App.playSound('join');
