@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="pt-BR" data-theme="light">
+<html lang="pt-BR" data-theme="dark-midnight">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -97,8 +97,8 @@
                     <button class="server-btn add-btn" id="btn-add-server" title="Criar ou Entrar em um Grupo">
                         <span class="icon">+</span>
                     </button>
-                    <button class="server-btn theme-btn" id="btn-toggle-theme" title="Alternar Tema Claro / Escuro">
-                        <span class="icon" id="theme-icon">🌙</span>
+                    <button class="server-btn theme-btn" id="btn-toggle-theme" title="Escolher Paleta de Cores / Tema">
+                        <span class="icon" id="theme-icon">🎨</span>
                     </button>
                 </div>
             </nav>
@@ -550,6 +550,62 @@
                     <p style="margin: 0 0 12px 0; font-size: 0.86rem; color: var(--text-muted);">Selecione um amigo para convidar para esta chamada privada:</p>
                     <div id="call-invite-friends-list" style="display: flex; flex-direction: column; gap: 8px; max-height: 320px; overflow-y: auto;">
                         <!-- Lista de amigos preenchida dinamicamente -->
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Modal: Escolher Paleta de Cores / Tema -->
+        <div id="modal-theme-picker" class="modal-overlay" style="display: none;">
+            <div class="modal-card theme-picker-modal-card">
+                <div class="modal-header">
+                    <h3>🎨 Paletas de Cores</h3>
+                    <button class="modal-close" data-close="modal-theme-picker">✕</button>
+                </div>
+                <div class="modal-body">
+                    <p style="margin: 0 0 12px 0; font-size: 0.85rem; color: var(--text-muted);">Escolha o tema visual que você prefere para o MiCord:</p>
+
+                    <div class="theme-section-label">🌙 Temas Escuros (Dark)</div>
+                    <div class="theme-picker-grid">
+                        <button type="button" class="theme-option-card" data-theme-choice="dark-midnight">
+                            <span class="theme-swatch" style="background: linear-gradient(135deg, #11131a 50%, #5865f2 50%);"></span>
+                            <span class="theme-option-info">
+                                <strong>Midnight Azul</strong>
+                                <small>Escuro padrão</small>
+                            </span>
+                        </button>
+                        <button type="button" class="theme-option-card" data-theme-choice="dark">
+                            <span class="theme-swatch" style="background: linear-gradient(135deg, #151117 50%, #ff6899 50%);"></span>
+                            <span class="theme-option-info">
+                                <strong>Rosa Neon</strong>
+                                <small>Escuro com rosa</small>
+                            </span>
+                        </button>
+                        <button type="button" class="theme-option-card" data-theme-choice="dark-emerald">
+                            <span class="theme-swatch" style="background: linear-gradient(135deg, #0d1412 50%, #10b981 50%);"></span>
+                            <span class="theme-option-info">
+                                <strong>Esmeralda</strong>
+                                <small>Escuro com verde</small>
+                            </span>
+                        </button>
+                    </div>
+
+                    <div class="theme-section-label" style="margin-top: 14px;">☀️ Temas Claros (Light)</div>
+                    <div class="theme-picker-grid">
+                        <button type="button" class="theme-option-card" data-theme-choice="light">
+                            <span class="theme-swatch" style="background: linear-gradient(135deg, #fff5f8 50%, #ff5c8d 50%);"></span>
+                            <span class="theme-option-info">
+                                <strong>Rosa Sakura</strong>
+                                <small>Claro com rosa</small>
+                            </span>
+                        </button>
+                        <button type="button" class="theme-option-card" data-theme-choice="light-ocean">
+                            <span class="theme-swatch" style="background: linear-gradient(135deg, #f4f8ff 50%, #2563eb 50%);"></span>
+                            <span class="theme-option-info">
+                                <strong>Azul Oceano</strong>
+                                <small>Claro com azul</small>
+                            </span>
+                        </button>
                     </div>
                 </div>
             </div>

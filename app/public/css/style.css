@@ -71,6 +71,87 @@
     --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.7);
 }
 
+[data-theme="dark-midnight"] {
+    /* Tema Escuro Padrão: Midnight Azul / Índigo */
+    --bg-primary: #11131a;
+    --bg-secondary: #181b25;
+    --bg-tertiary: #202433;
+    --bg-hover: #2a3044;
+    --bg-card: #1a1e2a;
+
+    --accent-pink: #6c7bff;
+    --accent-pink-hover: #8391ff;
+    --accent-pink-soft: #232847;
+    --accent-pink-border: #3a4272;
+    --accent-gradient: linear-gradient(135deg, #7c8aff 0%, #5865f2 100%);
+
+    --text-primary: #f3f5fc;
+    --text-secondary: #b5bdd4;
+    --text-muted: #78829e;
+    --text-inverse: #11131a;
+
+    --border-color: #2b3146;
+    --border-light: #222738;
+
+    --shadow-sm: 0 2px 10px rgba(0, 0, 0, 0.5);
+    --shadow-md: 0 8px 25px rgba(0, 0, 0, 0.6);
+    --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.72);
+}
+
+[data-theme="dark-emerald"] {
+    /* Tema Escuro Esmeralda / Cyber */
+    --bg-primary: #0d1412;
+    --bg-secondary: #131e1b;
+    --bg-tertiary: #1a2925;
+    --bg-hover: #233732;
+    --bg-card: #14211e;
+
+    --accent-pink: #10b981;
+    --accent-pink-hover: #34d399;
+    --accent-pink-soft: #14362c;
+    --accent-pink-border: #1e5746;
+    --accent-gradient: linear-gradient(135deg, #34d399 0%, #059669 100%);
+
+    --text-primary: #f0fdf8;
+    --text-secondary: #a7c9be;
+    --text-muted: #6c9186;
+    --text-inverse: #0d1412;
+
+    --border-color: #223832;
+    --border-light: #1a2c27;
+
+    --shadow-sm: 0 2px 10px rgba(0, 0, 0, 0.5);
+    --shadow-md: 0 8px 25px rgba(0, 0, 0, 0.6);
+    --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.72);
+}
+
+[data-theme="light-ocean"] {
+    /* Tema Claro Azul Oceano */
+    --bg-primary: #ffffff;
+    --bg-secondary: #f4f8ff;
+    --bg-tertiary: #e9f1ff;
+    --bg-hover: #dce8ff;
+    --bg-card: #ffffff;
+
+    --accent-pink: #2563eb;
+    --accent-pink-hover: #1d4ed8;
+    --accent-pink-soft: #e0ecff;
+    --accent-pink-border: #bfd6fe;
+    --accent-gradient: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+
+    --text-primary: #132038;
+    --text-secondary: #4e6282;
+    --text-muted: #8496b5;
+    --text-inverse: #ffffff;
+
+    --border-color: #d6e4fa;
+    --border-light: #edf4ff;
+
+    --shadow-sm: 0 2px 10px rgba(37, 99, 235, 0.08);
+    --shadow-md: 0 8px 25px rgba(37, 99, 235, 0.12);
+    --shadow-lg: 0 16px 40px rgba(37, 99, 235, 0.16);
+}
+
 * {
     box-sizing: border-box;
     margin: 0;
@@ -1664,4 +1745,81 @@ body {
     height: 100%;
     border: none;
     display: block;
+}
+
+
+/* ===================================================================
+   SELETOR DE PALETAS DE CORES / TEMAS
+   =================================================================== */
+.theme-picker-modal-card {
+    max-width: 460px;
+}
+
+.theme-section-label {
+    font-size: 0.74rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+}
+
+.theme-picker-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+    gap: 10px;
+}
+
+.theme-option-card {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px;
+    border-radius: var(--radius-md);
+    background: var(--bg-secondary);
+    border: 2px solid var(--border-color);
+    color: var(--text-primary);
+    cursor: pointer;
+    font-family: inherit;
+    text-align: left;
+    transition: transform 0.14s ease, border-color 0.15s ease, background 0.15s ease;
+}
+
+.theme-option-card:hover {
+    transform: translateY(-2px);
+    border-color: var(--accent-pink);
+    background: var(--bg-hover);
+}
+
+.theme-option-card.active {
+    border-color: var(--accent-pink);
+    background: var(--accent-pink-soft);
+    box-shadow: 0 0 0 2px var(--accent-pink-soft);
+}
+
+.theme-swatch {
+    width: 30px;
+    height: 30px;
+    border-radius: var(--radius-full);
+    flex-shrink: 0;
+    border: 2px solid rgba(255, 255, 255, 0.25);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+}
+
+.theme-option-info {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    overflow: hidden;
+}
+
+.theme-option-info strong {
+    font-size: 0.82rem;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.theme-option-info small {
+    font-size: 0.7rem;
+    color: var(--text-muted);
 }
