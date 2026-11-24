@@ -1012,6 +1012,9 @@ const WebRTCManager = {
                         this.isSpeaking = false;
                         this.socket?.emit('voice:speaking', { isSpeaking: false });
                         document.getElementById('peer-tile-self')?.classList.remove('speaking');
+                        if (this.socket?.id) {
+                            document.getElementById(`voice-pill-${this.socket.id}`)?.classList.remove('speaking');
+                        }
                     }
                     return;
                 }
@@ -1067,6 +1070,12 @@ const WebRTCManager = {
                     if (selfTile) {
                         selfTile.classList.toggle('speaking', this.isSpeaking);
                     }
+                    if (this.socket?.id) {
+                        const selfPill = document.getElementById(`voice-pill-${this.socket.id}`);
+                        if (selfPill) {
+                            selfPill.classList.toggle('speaking', this.isSpeaking);
+                        }
+                    }
                 }
             }, 16);
 
@@ -1100,6 +1109,9 @@ const WebRTCManager = {
             this.isSpeaking = false;
             this.socket?.emit('voice:speaking', { isSpeaking: false });
             document.getElementById('peer-tile-self')?.classList.remove('speaking');
+            if (this.socket?.id) {
+                document.getElementById(`voice-pill-${this.socket.id}`)?.classList.remove('speaking');
+            }
         }
         if (window.App) window.App.playSound(this.isMuted ? 'mute' : 'unmute');
         this.renderAllTiles();
