@@ -6,6 +6,8 @@ const WebRTCManager = {
     socket: null,
     currentChannelId: null,
     isDirectCall: false,
+    currentDirectCallId: null,
+    remoteSpeakingMonitors: new Map(),
     
     // Streams locais
     rawMicStream: null,
@@ -136,11 +138,12 @@ const WebRTCManager = {
         videoBtn?.addEventListener('click', () => this.toggleVideo());
         screenBtn?.addEventListener('click', () => this.toggleScreenShare());
         leaveBtn?.addEventListener('click', () => this.leaveRoom());
+        document.getElementById('webrtc-invite-btn')?.addEventListener('click', () => this.openInviteToCallModal());
 
         // Botões de chamada recebida
         document.getElementById('btn-accept-call')?.addEventListener('click', () => {
             if (this.pendingCall) {
-                this.acceptCall(this.pendingCall.callerSocketId, this.pendingCall.hasVideo);
+                this.acceptCall(this.pendingCall.callerSocketId, this.pendingCall.hasVideo, this.pendingCall.callId);
             }
         });
 
@@ -286,19 +289,9 @@ const WebRTCManager = {
             }
         });
 
-        // Indicador de fala de um peer
+        // Indicador de fala de um peer (com atualização de estado + auto-clear de segurança para nunca travar)
         this.socket.on('voice:peer-speaking', ({ socketId, isSpeaking }) => {
-            const tile = document.getElementById(`peer-tile-${socketId}`);
-            if (tile) {
-                if (isSpeaking) tile.classList.add('speaking');
-                else tile.classList.remove('speaking');
-            }
-            // Atualiza também se houver item no sidebar
-            const pill = document.getElementById(`voice-pill-${socketId}`);
-            if (pill) {
-                if (isSpeaking) pill.classList.add('speaking');
-                else pill.classList.remove('speaking');
-            }
+            this.setPeerSpeakingUI(socketId, Boolean(isSpeaking), true);
         });
 
         // Atualização de estado de vídeo/tela/mudo de um peer
@@ -306,6 +299,9 @@ const WebRTCManager = {
             const peer = this.peersData.get(socketId);
             if (peer) {
                 Object.assign(peer, state);
+                if (state.isMuted === true) {
+                    this.setPeerSpeakingUI(socketId, false, false);
+                }
                 // Se o peer parou de compartilhar tela/câmera, reseta o estado de ocultação local
                 const hidden = this.hiddenMedia.get(socketId);
                 if (hidden) {
@@ -335,19 +331,25 @@ const WebRTCManager = {
             }
         });
 
-        // Chamada direta recebida (1-on-1)
-        this.socket.on('call:incoming', ({ caller, callerSocketId, hasVideo }) => {
-            // Só ignora se já estiver conectado em chamada privada com essa MESMA pessoa
-            if (this.isDirectCall && this.peersData.has(callerSocketId)) return;
+        // Chamada privada recebida (1-a-1 ou convite para chamada privada em grupo)
+        this.socket.on('call:incoming', ({ callId, caller, callerSocketId, hasVideo, isGroupInvite }) => {
+            // Só ignora se já estiver conectado nessa mesma chamada privada
+            if (this.isDirectCall && ((callId && this.currentDirectCallId === callId) || this.peersData.has(callerSocketId))) {
+                return;
+            }
 
-            this.pendingCall = { caller, callerSocketId, hasVideo };
+            this.pendingCall = { callId, caller, callerSocketId, hasVideo };
             const nameEl = document.getElementById('caller-name');
             const descEl = document.getElementById('caller-type-desc');
             const avatarEl = document.getElementById('caller-avatar');
             const bannerEl = document.getElementById('incoming-call-banner');
 
             if (nameEl) nameEl.textContent = caller.display_name || caller.username;
-            if (descEl) descEl.textContent = hasVideo ? 'Chamada de vídeo recebida...' : 'Chamada de voz recebida...';
+            if (descEl) {
+                descEl.textContent = isGroupInvite
+                    ? 'Convidou você para uma chamada privada...'
+                    : (hasVideo ? 'Chamada de vídeo recebida...' : 'Chamada de voz recebida...');
+            }
             if (avatarEl) avatarEl.src = caller.avatar_url || '/assets/default-avatar.png';
             if (bannerEl) bannerEl.style.display = 'flex';
             if (window.App) window.App.startRinging('incoming');
@@ -361,28 +363,68 @@ const WebRTCManager = {
             if (window.App) window.App.stopRinging();
         });
 
-        // Para quem atendeu a chamada privada 1-a-1: abre a tela da call e inicia áudio local
-        this.socket.on('call:connected', async ({ peerSocketId, peer, hasVideo }) => {
+        // Novo amigo aceitou e entrou na nossa chamada privada (suporta 2, 3, 4+ pessoas!)
+        this.socket.on('call:peer-joined', async ({ callId, peer }) => {
+            const banner = document.getElementById('incoming-call-banner');
+            if (banner) banner.style.display = 'none';
+            this.pendingCall = null;
+
+            if (window.App) {
+                window.App.stopRinging();
+                window.App.playSound('peer-join');
+            }
+
+            this.isDirectCall = true;
+            if (callId) this.currentDirectCallId = callId;
+            if (peer && peer.socketId) {
+                this.peersData.set(peer.socketId, peer);
+            }
+
+            this.updateDirectCallTitle();
+            this.renderAllTiles();
+            await this.startLocalAudio();
+        });
+
+        // Para quem atendeu a chamada privada: entra na sala privada e conecta WebRTC com todos os participantes atuais
+        this.socket.on('call:connected', async ({ callId, peers, peerSocketId, peer, hasVideo }) => {
             const banner = document.getElementById('incoming-call-banner');
             if (banner) banner.style.display = 'none';
             this.pendingCall = null;
             if (window.App) window.App.stopRinging();
 
+            // Limpa conexões antigas caso estivesse em outra call
+            this.peerConnections.forEach(pc => pc.close());
+            this.peerConnections.clear();
+            this.pendingCandidates.clear();
+            this.makingOffer.clear();
+            this.stopAllRemoteSpeakingMonitors();
+            this.peersData.clear();
+
             this.isDirectCall = true;
-            if (peerSocketId) {
-                this.peersData.set(peerSocketId, {
-                    socketId: peerSocketId,
-                    user: peer || { username: 'Amigo', display_name: 'Amigo' }
-                });
-            }
-            const peerName = peer ? (peer.display_name || peer.username) : 'Amigo';
-            this.showRoomView(`Chamada com ${peerName}`);
+            this.currentDirectCallId = callId || null;
+
+            const peerList = Array.isArray(peers)
+                ? peers
+                : (peerSocketId ? [{ socketId: peerSocketId, user: peer || { username: 'Amigo', display_name: 'Amigo' } }] : []);
+
+            peerList.forEach(p => {
+                if (p && p.socketId) this.peersData.set(p.socketId, p);
+            });
+
+            this.updateDirectCallTitle();
             this.renderAllTiles();
             await this.startLocalAudio();
             if (hasVideo && !this.isVideoOn) await this.toggleVideo();
+
+            // Inicia conexão P2P com todos os participantes já presentes na chamada privada
+            for (const p of peerList) {
+                if (p && p.socketId) {
+                    await this.initiatePeerConnection(p.socketId, true);
+                }
+            }
         });
 
-        this.socket.on('call:accepted', async ({ peerSocketId, peer, hasVideo }) => {
+        this.socket.on('call:accepted', async ({ callId, peerSocketId, peer, hasVideo }) => {
             const banner = document.getElementById('incoming-call-banner');
             if (banner) banner.style.display = 'none';
             this.pendingCall = null;
@@ -391,8 +433,9 @@ const WebRTCManager = {
                 window.App.playSound('join');
             }
             this.isDirectCall = true;
+            if (callId) this.currentDirectCallId = callId;
             this.peersData.set(peerSocketId, { socketId: peerSocketId, user: peer });
-            this.showRoomView(`Chamada com ${peer.display_name || peer.username}`);
+            this.updateDirectCallTitle();
             this.renderAllTiles();
             await this.startLocalAudio();
             if (hasVideo) await this.toggleVideo();
@@ -1053,6 +1096,11 @@ const WebRTCManager = {
         }
 
         this.socket.emit('voice:state-update', { isMuted: this.isMuted });
+        if (this.isMuted && this.isSpeaking) {
+            this.isSpeaking = false;
+            this.socket?.emit('voice:speaking', { isSpeaking: false });
+            document.getElementById('peer-tile-self')?.classList.remove('speaking');
+        }
         if (window.App) window.App.playSound(this.isMuted ? 'mute' : 'unmute');
         this.renderAllTiles();
     },
@@ -1565,6 +1613,7 @@ const WebRTCManager = {
                     audVoice.muted = this.isDeafened || vols.voice === 0;
                     audVoice.play().catch(() => {});
                 }
+                this.startRemoteSpeakingMonitor(socketId, peer.voiceAudioStream);
             }
 
             if (peer.screenAudioStream) {
@@ -1665,12 +1714,183 @@ const WebRTCManager = {
         if (window.App) window.App.showToast(`Solicitação enviada para encerrar a ${label}.`);
     },
 
+    // Atualiza o contorno verde de fala de um peer de forma consistente e com auto-clear para nunca travar
+    setPeerSpeakingUI(socketId, isSpeaking, fromSocket = false) {
+        const peer = this.peersData.get(socketId);
+        if (peer) {
+            // Se o monitor de áudio local já está ativo para este peer, ignora sinal remoto atrasado
+            if (fromSocket && this.remoteSpeakingMonitors.has(socketId)) return;
+            if (peer.isMuted && isSpeaking) isSpeaking = false;
+
+            peer.isSpeaking = isSpeaking;
+            if (peer._speakingTimer) {
+                clearTimeout(peer._speakingTimer);
+                peer._speakingTimer = null;
+            }
+            if (isSpeaking) {
+                // Garantia contra travamento: desliga automaticamente se ficar 1.8s sem atualização
+                peer._speakingTimer = setTimeout(() => {
+                    this.setPeerSpeakingUI(socketId, false, false);
+                }, 1800);
+            }
+        }
+
+        const tile = document.getElementById(`peer-tile-${socketId}`);
+        if (tile) tile.classList.toggle('speaking', isSpeaking);
+
+        const pill = document.getElementById(`voice-pill-${socketId}`);
+        if (pill) pill.classList.toggle('speaking', isSpeaking);
+    },
+
+    // Monitora o áudio real recebido de cada participante para acender o contorno verde com precisão e sem travar
+    startRemoteSpeakingMonitor(socketId, stream) {
+        if (!stream || stream.getAudioTracks().length === 0) return;
+        const existing = this.remoteSpeakingMonitors.get(socketId);
+        if (existing && existing.stream === stream) return;
+        this.stopRemoteSpeakingMonitor(socketId);
+
+        try {
+            const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+            const ctx = this.audioContext || new AudioContextClass();
+            if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+
+            const source = ctx.createMediaStreamSource(stream);
+            const analyser = ctx.createAnalyser();
+            analyser.fftSize = 256;
+            analyser.smoothingTimeConstant = 0.5;
+            source.connect(analyser);
+
+            const data = new Float32Array(analyser.fftSize);
+            let lastLoudMs = 0;
+            let speaking = false;
+
+            const interval = setInterval(() => {
+                const peer = this.peersData.get(socketId);
+                if (!peer || !stream.getAudioTracks().some(t => t.readyState === 'live')) {
+                    this.stopRemoteSpeakingMonitor(socketId);
+                    this.setPeerSpeakingUI(socketId, false, false);
+                    return;
+                }
+
+                if (peer.isMuted) {
+                    if (speaking) {
+                        speaking = false;
+                        this.setPeerSpeakingUI(socketId, false, false);
+                    }
+                    return;
+                }
+
+                analyser.getFloatTimeDomainData(data);
+                let sum = 0;
+                for (let i = 0; i < data.length; i++) sum += data[i] * data[i];
+                const rms = Math.sqrt(sum / data.length);
+                const now = Date.now();
+
+                if (rms > 0.012) {
+                    lastLoudMs = now;
+                    if (!speaking) {
+                        speaking = true;
+                        this.setPeerSpeakingUI(socketId, true, false);
+                    }
+                } else if (speaking && now - lastLoudMs > 300) {
+                    speaking = false;
+                    this.setPeerSpeakingUI(socketId, false, false);
+                }
+            }, 60);
+
+            this.remoteSpeakingMonitors.set(socketId, { stream, source, analyser, interval });
+        } catch (e) {}
+    },
+
+    stopRemoteSpeakingMonitor(socketId) {
+        const mon = this.remoteSpeakingMonitors.get(socketId);
+        if (!mon) return;
+        clearInterval(mon.interval);
+        try { mon.source.disconnect(); } catch (e) {}
+        this.remoteSpeakingMonitors.delete(socketId);
+    },
+
+    stopAllRemoteSpeakingMonitors() {
+        for (const socketId of Array.from(this.remoteSpeakingMonitors.keys())) {
+            this.stopRemoteSpeakingMonitor(socketId);
+        }
+    },
+
+    updateDirectCallTitle() {
+        const names = [];
+        this.peersData.forEach(p => {
+            if (p?.user) names.push(p.user.display_name || p.user.username);
+        });
+        const title = names.length > 0 ? `Chamada com ${names.join(', ')}` : 'Chamada Privada';
+        this.showRoomView(title);
+    },
+
+    openInviteToCallModal() {
+        const listEl = document.getElementById('call-invite-friends-list');
+        if (!listEl) return;
+        listEl.innerHTML = '';
+
+        const allFriends = window.FriendsManager ? window.FriendsManager.friends : [];
+        const inCallUserIds = new Set();
+        this.peersData.forEach(p => {
+            if (p?.user?.id) inCallUserIds.add(p.user.id);
+        });
+
+        const availableFriends = allFriends.filter(f => !inCallUserIds.has(f.id));
+
+        if (availableFriends.length === 0) {
+            listEl.innerHTML = '<p style="text-align:center; color: var(--text-muted); padding: 16px;">Todos os seus amigos já estão na chamada ou você ainda não tem amigos adicionados.</p>';
+        } else {
+            availableFriends.forEach(friend => {
+                const row = document.createElement('div');
+                row.className = 'friend-row';
+                row.style.padding = '8px 10px';
+                row.innerHTML = `
+                    <div class="friend-info">
+                        <div class="avatar-wrapper" style="width: 34px; height: 34px;">
+                            <img src="${friend.avatar_url || '/assets/default-avatar.png'}" class="friend-avatar" style="width: 34px; height: 34px;" alt="${friend.display_name}">
+                            <span class="status-indicator ${friend.status || 'offline'}"></span>
+                        </div>
+                        <div>
+                            <strong style="font-size: 0.9rem;">${friend.display_name || friend.username}</strong>
+                            <div style="font-size: 0.75rem; color: var(--text-muted);">@${friend.username}</div>
+                        </div>
+                    </div>
+                    <button type="button" class="btn btn-primary btn-sm">📞 Convidar</button>
+                `;
+                const btn = row.querySelector('button');
+                btn.addEventListener('click', () => {
+                    this.inviteFriendToCall(friend.id, friend.display_name || friend.username);
+                    btn.disabled = true;
+                    btn.textContent = '✓ Convidado';
+                });
+                listEl.appendChild(row);
+            });
+        }
+
+        document.getElementById('modal-call-invite').style.display = 'flex';
+    },
+
+    inviteFriendToCall(friendId, friendName) {
+        if (!this.socket || !this.isDirectCall) return;
+        this.socket.emit('call:invite-friend', {
+            recipientId: friendId,
+            callId: this.currentDirectCallId
+        });
+        if (window.App) {
+            window.App.showToast(`📞 Convite de chamada enviado para ${friendName}!`);
+        }
+    },
+
     removePeer(socketId) {
         const pc = this.peerConnections.get(socketId);
         if (pc) {
             pc.close();
             this.peerConnections.delete(socketId);
         }
+        const peer = this.peersData.get(socketId);
+        if (peer && peer._speakingTimer) clearTimeout(peer._speakingTimer);
+        this.stopRemoteSpeakingMonitor(socketId);
         this.pendingCandidates.delete(socketId);
         this.makingOffer.delete(socketId);
         this.peerVolumes.delete(socketId);
@@ -1678,6 +1898,9 @@ const WebRTCManager = {
         if (this.openVolumePopoverId === socketId) this.openVolumePopoverId = null;
         if (this.pinnedSocketId === socketId) this.pinnedSocketId = null;
         this.peersData.delete(socketId);
+        if (this.isDirectCall && this.peersData.size > 0) {
+            this.updateDirectCallTitle();
+        }
         this.renderAllTiles();
     },
 
@@ -1688,6 +1911,8 @@ const WebRTCManager = {
         document.getElementById('webrtc-room-name').textContent = title;
         document.getElementById('active-title').textContent = title;
         document.getElementById('active-symbol').textContent = '🔊';
+        const inviteBtn = document.getElementById('webrtc-invite-btn');
+        if (inviteBtn) inviteBtn.style.display = this.isDirectCall ? 'inline-flex' : 'none';
     },
 
     leaveRoom() {
@@ -1697,11 +1922,18 @@ const WebRTCManager = {
         }
 
         if (this.isDirectCall) {
-            this.peersData.forEach((_, socketId) => {
-                this.socket.emit('call:end', { peerSocketId: socketId });
-            });
+            this.socket.emit('call:end', { callId: this.currentDirectCallId });
             this.isDirectCall = false;
+            this.currentDirectCallId = null;
         }
+
+        const inviteBtn = document.getElementById('webrtc-invite-btn');
+        if (inviteBtn) inviteBtn.style.display = 'none';
+        const inviteModal = document.getElementById('modal-call-invite');
+        if (inviteModal) inviteModal.style.display = 'none';
+
+        this.stopAllRemoteSpeakingMonitors();
+        this.isSpeaking = false;
 
         // Para streams e fecha conexões
         if (this.rawMicStream) {
@@ -1777,8 +2009,8 @@ const WebRTCManager = {
         }
     },
 
-    // Aceitar chamada 1-a-1 recebida
-    async acceptCall(callerSocketId, hasVideo) {
+    // Aceitar chamada privada recebida (1-a-1 ou grupo privado)
+    async acceptCall(callerSocketId, hasVideo, callId = null) {
         const banner = document.getElementById('incoming-call-banner');
         if (banner) banner.style.display = 'none';
         this.pendingCall = null;
@@ -1791,7 +2023,7 @@ const WebRTCManager = {
             window.App.playSound('join');
         }
         this.isDirectCall = true;
-        this.socket.emit('call:accept', { callerSocketId, hasVideo });
+        this.socket.emit('call:accept', { callId, callerSocketId, hasVideo });
     }
 };
 

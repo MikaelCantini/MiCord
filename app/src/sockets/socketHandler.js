@@ -7,8 +7,10 @@ const db = require('../db');
 const userSockets = new Map();
 // Map<socketId, { userId, user }>
 const socketUsers = new Map();
-// Map<channelId, Set<{ socketId, user, isMuted, isDeafened, hasVideo, hasScreen, isSpeaking }>>
+// Map<channelId, Map<socketId, participantData>>
 const voiceRooms = new Map();
+// Chamadas privadas (1-a-1 ou em grupo privado): Map<callId, Map<socketId, participantData>>
+const directCalls = new Map();
 // Controle de anti-spam por usuário: Map<userId, { timestamps: number[], cooldownUntil: number }>
 const userSpamTracker = new Map();
 
@@ -251,7 +253,7 @@ function setupSocketIO(io) {
             });
         });
 
-        // Atualização de estado da voz/vídeo/tela (em sala de grupo OU chamada privada 1-a-1)
+        // Atualização de estado da voz/vídeo/tela (em sala de grupo OU chamada privada)
         socket.on('voice:state-update', (state) => {
             if (socket.voiceChannelId) {
                 const room = voiceRooms.get(socket.voiceChannelId);
@@ -265,11 +267,19 @@ function setupSocketIO(io) {
                     userId: user.id,
                     state
                 });
-            } else if (socket.directCallPeerSocketId) {
-                io.to(socket.directCallPeerSocketId).emit('voice:peer-state-updated', {
-                    socketId: socket.id,
-                    userId: user.id,
-                    state
+            } else if (socket.directCallId) {
+                const callRoom = directCalls.get(socket.directCallId);
+                if (!callRoom || !callRoom.has(socket.id)) return;
+
+                Object.assign(callRoom.get(socket.id), state);
+                callRoom.forEach((_, peerSocketId) => {
+                    if (peerSocketId !== socket.id) {
+                        io.to(peerSocketId).emit('voice:peer-state-updated', {
+                            socketId: socket.id,
+                            userId: user.id,
+                            state
+                        });
+                    }
                 });
             }
         });
@@ -297,23 +307,96 @@ function setupSocketIO(io) {
                     userId: user.id,
                     isSpeaking
                 });
-            } else if (socket.directCallPeerSocketId) {
-                io.to(socket.directCallPeerSocketId).emit('voice:peer-speaking', {
-                    socketId: socket.id,
-                    userId: user.id,
-                    isSpeaking
+            } else if (socket.directCallId) {
+                const callRoom = directCalls.get(socket.directCallId);
+                if (!callRoom || !callRoom.has(socket.id)) return;
+
+                callRoom.get(socket.id).isSpeaking = isSpeaking;
+                callRoom.forEach((_, peerSocketId) => {
+                    if (peerSocketId !== socket.id) {
+                        io.to(peerSocketId).emit('voice:peer-speaking', {
+                            socketId: socket.id,
+                            userId: user.id,
+                            isSpeaking
+                        });
+                    }
                 });
             }
         });
 
         // ----------------------------------------------------
-        // 3. CHAMADAS DIRETAS 1-A-1 COM AMIGOS (Voice/Video/Screen)
+        // 3. CHAMADAS PRIVADAS COM AMIGOS (1-a-1 e Multi-Participantes)
         // ----------------------------------------------------
-        socket.on('call:initiate', ({ recipientId, hasVideo }) => {
+        function createParticipantSnapshot(sock) {
+            return {
+                socketId: sock.id,
+                user: {
+                    id: sock.user.id,
+                    username: sock.user.username,
+                    display_name: sock.user.display_name,
+                    avatar_url: sock.user.avatar_url
+                },
+                isMuted: false,
+                isDeafened: false,
+                hasVideo: false,
+                hasScreen: false,
+                isSpeaking: false
+            };
+        }
+
+        function leaveCurrentDirectCall(sock) {
+            if (!sock.directCallId) return;
+            const callId = sock.directCallId;
+            sock.directCallId = null;
+
+            const callRoom = directCalls.get(callId);
+            if (!callRoom) return;
+
+            callRoom.delete(sock.id);
+
+            if (callRoom.size === 0) {
+                directCalls.delete(callId);
+                return;
+            }
+
+            // Se ainda há 2+ pessoas na call privada, apenas notifica que este saiu;
+            // se sobrou só 1 pessoa (chamada de 2 que terminou), encerra para quem ficou
+            if (callRoom.size === 1) {
+                callRoom.forEach((_, remainingSocketId) => {
+                    const remSock = io.sockets.sockets.get(remainingSocketId);
+                    if (remSock) remSock.directCallId = null;
+                    io.to(remainingSocketId).emit('call:ended', { userId: sock.user.id });
+                });
+                directCalls.delete(callId);
+            } else {
+                callRoom.forEach((_, peerSocketId) => {
+                    io.to(peerSocketId).emit('voice:peer-left', {
+                        socketId: sock.id,
+                        userId: sock.user.id
+                    });
+                });
+            }
+        }
+
+        socket.on('call:initiate', ({ recipientId, hasVideo, callId }) => {
             const targetId = parseInt(recipientId);
             if (!targetId) return;
 
+            // Reusa a chamada privada atual ou cria uma nova
+            let activeCallId = callId || socket.directCallId;
+            if (!activeCallId || !directCalls.has(activeCallId)) {
+                activeCallId = `dc-${user.id}-${Date.now()}`;
+                directCalls.set(activeCallId, new Map());
+            }
+
+            const callRoom = directCalls.get(activeCallId);
+            if (!callRoom.has(socket.id)) {
+                callRoom.set(socket.id, createParticipantSnapshot(socket));
+            }
+            socket.directCallId = activeCallId;
+
             io.to(`user-${targetId}`).emit('call:incoming', {
+                callId: activeCallId,
                 caller: {
                     id: user.id,
                     username: user.username,
@@ -321,45 +404,68 @@ function setupSocketIO(io) {
                     avatar_url: user.avatar_url
                 },
                 callerSocketId: socket.id,
-                hasVideo
+                hasVideo: Boolean(hasVideo)
             });
         });
 
-        socket.on('call:accept', ({ callerSocketId, hasVideo }) => {
-            // Vincula os dois sockets na chamada privada 1-a-1
-            socket.directCallPeerSocketId = callerSocketId;
-            const callerSocket = io.sockets.sockets.get(callerSocketId);
-            if (callerSocket) {
-                callerSocket.directCallPeerSocketId = socket.id;
-            }
+        socket.on('call:invite-friend', ({ recipientId, callId }) => {
+            const targetId = parseInt(recipientId);
+            const activeCallId = callId || socket.directCallId;
+            if (!targetId || !activeCallId || !directCalls.has(activeCallId)) return;
 
-            const callerUser = callerSocket?.user
-                ? {
-                    id: callerSocket.user.id,
-                    username: callerSocket.user.username,
-                    display_name: callerSocket.user.display_name,
-                    avatar_url: callerSocket.user.avatar_url
-                }
-                : null;
-
-            // Fecha o banner de chamada recebida em todas as guias de quem atendeu
-            io.to(`user-${user.id}`).emit('call:dismiss-incoming');
-
-            io.to(callerSocketId).emit('call:accepted', {
-                peerSocketId: socket.id,
-                peer: {
+            io.to(`user-${targetId}`).emit('call:incoming', {
+                callId: activeCallId,
+                caller: {
                     id: user.id,
                     username: user.username,
                     display_name: user.display_name,
                     avatar_url: user.avatar_url
                 },
-                hasVideo
+                callerSocketId: socket.id,
+                hasVideo: false,
+                isGroupInvite: true
+            });
+        });
+
+        socket.on('call:accept', ({ callId, callerSocketId, hasVideo }) => {
+            const callerSocket = io.sockets.sockets.get(callerSocketId);
+            let activeCallId = callId || callerSocket?.directCallId;
+
+            if (!activeCallId || !directCalls.has(activeCallId)) {
+                activeCallId = `dc-${Date.now()}`;
+                directCalls.set(activeCallId, new Map());
+                if (callerSocket) {
+                    callerSocket.directCallId = activeCallId;
+                    directCalls.get(activeCallId).set(callerSocket.id, createParticipantSnapshot(callerSocket));
+                }
+            }
+
+            const callRoom = directCalls.get(activeCallId);
+
+            // Fecha o banner de chamada recebida em todas as guias de quem atendeu
+            io.to(`user-${user.id}`).emit('call:dismiss-incoming');
+
+            // Lista de peers que já estão na chamada privada antes deste entrar
+            const existingPeers = Array.from(callRoom.values()).filter(p => p.socketId !== socket.id);
+            const mySnapshot = createParticipantSnapshot(socket);
+
+            // Adiciona quem atendeu na chamada privada
+            callRoom.set(socket.id, mySnapshot);
+            socket.directCallId = activeCallId;
+
+            // Notifica quem já estava na chamada privada que um novo participante entrou
+            existingPeers.forEach(p => {
+                io.to(p.socketId).emit('call:peer-joined', {
+                    callId: activeCallId,
+                    peer: mySnapshot
+                });
             });
 
+            // Envia para quem atendeu a lista de todos os participantes atuais para iniciar WebRTC com cada um
             socket.emit('call:connected', {
-                peerSocketId: callerSocketId,
-                peer: callerUser,
-                hasVideo
+                callId: activeCallId,
+                peers: existingPeers,
+                hasVideo: Boolean(hasVideo)
             });
         });
 
@@ -371,34 +477,16 @@ function setupSocketIO(io) {
             });
         });
 
-        socket.on('call:end', ({ peerSocketId }) => {
-            const targetId = peerSocketId || socket.directCallPeerSocketId;
-            socket.directCallPeerSocketId = null;
-            if (targetId) {
-                const peerSock = io.sockets.sockets.get(targetId);
-                if (peerSock && peerSock.directCallPeerSocketId === socket.id) {
-                    peerSock.directCallPeerSocketId = null;
-                }
-                io.to(targetId).emit('call:ended', {
-                    userId: user.id
-                });
-            }
+        socket.on('call:end', () => {
+            leaveCurrentDirectCall(socket);
         });
 
         // ----------------------------------------------------
         // DESCONEXÃO DO USUÁRIO
         // ----------------------------------------------------
         socket.on('disconnect', () => {
-            // Se estava em chamada privada 1-a-1, encerra para o outro lado
-            if (socket.directCallPeerSocketId) {
-                const peerId = socket.directCallPeerSocketId;
-                socket.directCallPeerSocketId = null;
-                const peerSock = io.sockets.sockets.get(peerId);
-                if (peerSock && peerSock.directCallPeerSocketId === socket.id) {
-                    peerSock.directCallPeerSocketId = null;
-                }
-                io.to(peerId).emit('call:ended', { userId: user.id });
-            }
+            // Se estava em chamada privada, sai dela
+            leaveCurrentDirectCall(socket);
 
             // Se estava em sala de voz, remove
             leaveCurrentVoiceRoom(socket);

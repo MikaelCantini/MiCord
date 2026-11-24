@@ -315,7 +315,10 @@
                             <span class="live-dot"></span>
                             <span id="webrtc-room-name">Conectado na Sala de Voz</span>
                         </div>
-                        <span id="webrtc-participants-count" class="pill-badge">1 participante</span>
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <button type="button" class="btn btn-primary btn-sm" id="webrtc-invite-btn" style="display: none;" title="Convidar mais amigos para esta chamada privada">➕ Adicionar Pessoa</button>
+                            <span id="webrtc-participants-count" class="pill-badge">1 participante</span>
+                        </div>
                     </div>
 
                     <!-- Grid de Vídeos / Participantes -->
@@ -533,6 +536,22 @@
             <div class="call-actions">
                 <button class="btn btn-success" id="btn-accept-call">Atender 📞</button>
                 <button class="btn btn-danger" id="btn-decline-call">Recusar ✕</button>
+            </div>
+        </div>
+
+        <!-- Modal: Convidar Amigos para Chamada Privada -->
+        <div id="modal-call-invite" class="modal-overlay" style="display: none;">
+            <div class="modal-card">
+                <div class="modal-header">
+                    <h3>➕ Adicionar Pessoa na Chamada</h3>
+                    <button class="modal-close" data-close="modal-call-invite">✕</button>
+                </div>
+                <div class="modal-body">
+                    <p style="margin: 0 0 12px 0; font-size: 0.86rem; color: var(--text-muted);">Selecione um amigo para convidar para esta chamada privada:</p>
+                    <div id="call-invite-friends-list" style="display: flex; flex-direction: column; gap: 8px; max-height: 320px; overflow-y: auto;">
+                        <!-- Lista de amigos preenchida dinamicamente -->
+                    </div>
+                </div>
             </div>
         </div>
 
