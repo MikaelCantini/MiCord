@@ -310,7 +310,10 @@ function setupSocketIO(io) {
         // 3. CHAMADAS DIRETAS 1-A-1 COM AMIGOS (Voice/Video/Screen)
         // ----------------------------------------------------
         socket.on('call:initiate', ({ recipientId, hasVideo }) => {
-            io.to(`user-${recipientId}`).emit('call:incoming', {
+            const targetId = parseInt(recipientId);
+            if (!targetId) return;
+
+            io.to(`user-${targetId}`).emit('call:incoming', {
                 caller: {
                     id: user.id,
                     username: user.username,

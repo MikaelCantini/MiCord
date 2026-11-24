@@ -337,14 +337,19 @@ const WebRTCManager = {
 
         // Chamada direta recebida (1-on-1)
         this.socket.on('call:incoming', ({ caller, callerSocketId, hasVideo }) => {
-            // Se já está em uma chamada ou sala de voz, não exibe o banner de aceitar/recusar por cima
-            if (this.isDirectCall || this.currentChannelId) return;
+            // Só ignora se já estiver conectado em chamada privada com essa MESMA pessoa
+            if (this.isDirectCall && this.peersData.has(callerSocketId)) return;
 
             this.pendingCall = { caller, callerSocketId, hasVideo };
-            document.getElementById('caller-name').textContent = caller.display_name || caller.username;
-            document.getElementById('caller-type-desc').textContent = hasVideo ? 'Chamada de vídeo recebida...' : 'Chamada de voz recebida...';
-            document.getElementById('caller-avatar').src = caller.avatar_url || '/assets/default-avatar.png';
-            document.getElementById('incoming-call-banner').style.display = 'flex';
+            const nameEl = document.getElementById('caller-name');
+            const descEl = document.getElementById('caller-type-desc');
+            const avatarEl = document.getElementById('caller-avatar');
+            const bannerEl = document.getElementById('incoming-call-banner');
+
+            if (nameEl) nameEl.textContent = caller.display_name || caller.username;
+            if (descEl) descEl.textContent = hasVideo ? 'Chamada de vídeo recebida...' : 'Chamada de voz recebida...';
+            if (avatarEl) avatarEl.src = caller.avatar_url || '/assets/default-avatar.png';
+            if (bannerEl) bannerEl.style.display = 'flex';
             if (window.App) window.App.startRinging('incoming');
         });
 
@@ -1759,6 +1764,10 @@ const WebRTCManager = {
 
     // Iniciar chamada 1-a-1 com amigo
     startDirectCall(friendId, hasVideo) {
+        if (this.currentChannelId) {
+            this.socket.emit('voice:leave-room');
+            this.currentChannelId = null;
+        }
         this.isDirectCall = true;
         this.socket.emit('call:initiate', { recipientId: friendId, hasVideo });
         this.showRoomView(`Chamando amigo...`);
@@ -1773,6 +1782,10 @@ const WebRTCManager = {
         const banner = document.getElementById('incoming-call-banner');
         if (banner) banner.style.display = 'none';
         this.pendingCall = null;
+        if (this.currentChannelId) {
+            this.socket.emit('voice:leave-room');
+            this.currentChannelId = null;
+        }
         if (window.App) {
             window.App.stopRinging();
             window.App.playSound('join');
